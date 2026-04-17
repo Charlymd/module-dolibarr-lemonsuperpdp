@@ -160,6 +160,99 @@ class ActionsLemonSuperPDP
 	}
 
 	/**
+	 * Ajoute l'entrée "Envoyer via SUPER PDP" dans le menu déroulant des actions
+	 * en masse sur la liste des factures.
+	 */
+	public function addMoreMassActions($parameters, &$object, &$action, $hookmanager)
+	{
+		global $langs, $user;
+
+		if (!isModEnabled('lemonsuperpdp')) return 0;
+		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return 0;
+		if (!$user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) return 0;
+
+		$contexts = explode(':', $parameters['context']);
+		if (!in_array('invoicelist', $contexts)) return 0;
+
+		$langs->load("lemonsuperpdp@lemonsuperpdp");
+		$this->resprints = '<option value="dosendsuperpdp_bulk">'.dol_escape_htmltag($langs->trans('LemonSuperPDPSendSelected')).'</option>';
+		return 1;
+	}
+
+	/**
+	 * Traite l'action en masse "Envoyer via SUPER PDP" sur les factures sélectionnées.
+	 */
+	public function doMassActions($parameters, &$object, &$action, $hookmanager)
+	{
+		global $langs, $user, $conf, $db;
+
+		if ($action !== 'dosendsuperpdp_bulk') return 0;
+		if (!isModEnabled('lemonsuperpdp')) return 0;
+		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return 0;
+
+		$contexts = explode(':', $parameters['context']);
+		if (!in_array('invoicelist', $contexts)) return 0;
+
+		if (!$user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
+			setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
+			return 0;
+		}
+
+		$langs->load("lemonsuperpdp@lemonsuperpdp");
+
+		$toselect = !empty($parameters['toselect']) && is_array($parameters['toselect']) ? $parameters['toselect'] : array();
+		if (empty($toselect)) {
+			setEventMessages($langs->trans('NoRecordSelected'), null, 'warnings');
+			return 0;
+		}
+
+		require_once DOL_DOCUMENT_ROOT.'/compta/facture/class/facture.class.php';
+
+		$nbOk = 0;
+		$nbKo = 0;
+		$nbSkipped = 0;
+
+		foreach ($toselect as $id) {
+			$facture = new Facture($db);
+			if ($facture->fetch((int) $id) <= 0) {
+				$nbKo++;
+				continue;
+			}
+			// On réutilise la même logique que l'envoi unitaire via doActions.
+			// Pour garder le code simple et éviter la duplication, on met $action
+			// à 'dosendsuperpdp' juste le temps d'un appel, puis on le restaure.
+			$bulkAction = 'dosendsuperpdp';
+			$this->doActions($parameters, $facture, $bulkAction, $hookmanager);
+			// doActions réinitialise $bulkAction = ''. On regarde la dernière
+			// transmission pour savoir si ça a passé.
+			dol_include_once('/lemonsuperpdp/class/transmission.class.php');
+			$t = new LemonSuperPDPTransmission($db);
+			if ($t->fetchLastByFacture($facture->id) > 0) {
+				if ($t->status === LemonSuperPDPTransmission::STATUS_SENT) {
+					$nbOk++;
+				} elseif ($t->status === LemonSuperPDPTransmission::STATUS_ERROR) {
+					$nbKo++;
+				} else {
+					$nbSkipped++;
+				}
+			} else {
+				$nbSkipped++;
+			}
+		}
+
+		$summary = $langs->trans('LemonSuperPDPBulkResult', $nbOk, $nbKo, $nbSkipped);
+		if ($nbKo === 0 && $nbOk > 0) {
+			setEventMessages($summary, null, 'mesgs');
+		} elseif ($nbKo > 0) {
+			setEventMessages($summary, null, 'warnings');
+		} else {
+			setEventMessages($summary, null, 'mesgs');
+		}
+
+		return 0;
+	}
+
+	/**
 	 * Intercepte l'action dosendsuperpdp : lit le PDF, envoie via l'API, stocke la transmission.
 	 */
 	public function doActions($parameters, &$object, &$action, $hookmanager)
@@ -242,6 +335,19 @@ class ActionsLemonSuperPDP
 				$action = '';
 				return 0;
 			}
+			// Récupération du SIREN réel du destinataire pour le remplacer par
+			// celui de Tricatel sandbox (000000001). Sans ça, SUPER PDP refuse
+			// parce que l'annuaire sandbox ne connaît pas le SIREN du vrai client.
+			$realClientSiren = '';
+			if (empty($object->thirdparty)) {
+				$object->fetch_thirdparty();
+			}
+			if (!empty($object->thirdparty)) {
+				$clientSrc = !empty($object->thirdparty->idprof1) ? $object->thirdparty->idprof1 : $object->thirdparty->idprof2;
+				$realClientSiren = substr(preg_replace('/[^0-9]/', '', (string) $clientSrc), 0, 9);
+			}
+			$fakeClientSiren = '000000001';  // Tricatel sandbox SUPER PDP
+
 			try {
 				// On réutilise la lib atgp/factur-x déjà embarquée dans LemonFacturX
 				// (pas de dépendance composer dans LemonSuperPDP).
@@ -254,22 +360,25 @@ class ActionsLemonSuperPDP
 				$pdfBinary = file_get_contents($pdfPath);
 				$xml = $reader->extractXML($pdfBinary, false);
 
-				// Substitution ciblée : on ne remplace que les occurrences exactes
-				// du SIREN entre balises ou en valeur d'attribut. Le pattern
-				// "> 9 chiffres <" ne matche pas le SIRET (14 chiffres), donc
-				// le SIRET et le numéro TVA intracommunautaire restent intacts.
-				$patched = str_replace(
-					array('>'.$realSiren.'<', '"'.$realSiren.'"'),
-					array('>'.$fakeSiren.'<', '"'.$fakeSiren.'"'),
-					$xml
-				);
+				// Substitutions ciblées : ">9 chiffres<" ou '"9 chiffres"'.
+				// Le pattern ne matche pas le SIRET (14 chiffres), donc SIRET et
+				// numéro TVA intracommunautaire restent intacts.
+				$search = array('>'.$realSiren.'<', '"'.$realSiren.'"');
+				$replace = array('>'.$fakeSiren.'<', '"'.$fakeSiren.'"');
+				if (strlen($realClientSiren) === 9 && $realClientSiren !== $realSiren) {
+					$search[] = '>'.$realClientSiren.'<';
+					$search[] = '"'.$realClientSiren.'"';
+					$replace[] = '>'.$fakeClientSiren.'<';
+					$replace[] = '"'.$fakeClientSiren.'"';
+				}
+				$patched = str_replace($search, $replace, $xml);
 
 				$tmpXmlPath = tempnam(sys_get_temp_dir(), 'lemonspd_').'.xml';
 				file_put_contents($tmpXmlPath, $patched);
 				$fileToSend = $tmpXmlPath;
 				$formatSent = 'cii';
 				$t->format_sent = 'cii-sandbox';
-				dol_syslog('LemonSuperPDP [SANDBOX]: SIREN '.$realSiren.' -> '.$fakeSiren.', envoi en CII', LOG_WARNING);
+				dol_syslog('LemonSuperPDP [SANDBOX]: vendeur '.$realSiren.'->'.$fakeSiren.', client '.$realClientSiren.'->'.$fakeClientSiren.', envoi en CII', LOG_WARNING);
 			} catch (Exception $e) {
 				dol_syslog('LemonSuperPDP [SANDBOX]: échec extraction/patch XML : '.$e->getMessage(), LOG_ERR);
 				$t->status = LemonSuperPDPTransmission::STATUS_ERROR;

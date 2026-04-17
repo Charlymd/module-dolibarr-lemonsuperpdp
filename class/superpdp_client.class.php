@@ -12,6 +12,8 @@
  * Référence : https://www.superpdp.tech/documentation
  */
 
+require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';  // dolibarr_set_const
+
 /**
  * Exception levée lors d'un échec d'appel à l'API SUPER PDP.
  */
