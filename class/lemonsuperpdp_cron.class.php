@@ -23,6 +23,9 @@
 
 class LemonSuperPDPCron
 {
+	/** Pagination : on s'arrête au-delà pour éviter une boucle infinie en cas de réponse API incohérente. */
+	const MAX_PAGES = 50;
+
 	public $db;
 	public $error = '';
 	public $output = '';
@@ -84,7 +87,7 @@ class LemonSuperPDPCron
 
 		try {
 			$hasAfter = true;
-			while ($hasAfter && $nbPages < 50) {
+			while ($hasAfter && $nbPages < self::MAX_PAGES) {
 				$nbPages++;
 				$resp = $client->listInvoiceEvents($lastId);
 				$data = !empty($resp['data']) && is_array($resp['data']) ? $resp['data'] : array();
@@ -99,33 +102,32 @@ class LemonSuperPDPCron
 					$invoiceId = !empty($ev['invoice_id']) ? (int) $ev['invoice_id'] : 0;
 					if ($invoiceId <= 0) continue;
 
-					$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
+					// Une seule requête pour récupérer rowid + fk_facture
+					// (évite le N+1 quand on crée l'action agenda juste après).
+					$sql = "SELECT rowid, fk_facture FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
 					$sql .= " WHERE superpdp_id = ".((int) $invoiceId);
 					$sql .= " LIMIT 1";
 					$sqlRes = $this->db->query($sql);
 					$fkTransmission = 0;
+					$fkFacture = 0;
 					if ($sqlRes && ($row = $this->db->fetch_object($sqlRes))) {
 						$fkTransmission = (int) $row->rowid;
+						$fkFacture = (int) $row->fk_facture;
 						$this->db->free($sqlRes);
 					}
 					if ($fkTransmission <= 0) continue;
 
-					$newEv = new LemonSuperPDPEvent($this->db);
-					$newEv->fk_transmission = $fkTransmission;
-					$newEv->superpdp_event_id = (int) $ev['id'];
-					$newEv->status_code = (string) $ev['status_code'];
-					$newEv->message = !empty($ev['message']) ? (string) $ev['message'] : null;
-					$newEv->direction = LemonSuperPDPEvent::DIRECTION_IN;
-					$newEv->event_date = !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now();
-					$newEv->payload_raw = json_encode($ev);
-					if ($newEv->create($user) > 0) {
-						// Lookup fk_facture pour créer l'action agenda associée
-						$sqlFK = "SELECT fk_facture FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission WHERE rowid = ".((int) $fkTransmission);
-						$resqlFK = $this->db->query($sqlFK);
-						if ($resqlFK && ($rowFK = $this->db->fetch_object($resqlFK))) {
-							$newEv->createActionComm((int) $rowFK->fk_facture, $user);
-							$this->db->free($resqlFK);
-						}
+					$inserted = LemonSuperPDPEvent::createAndLog($this->db, array(
+						'fk_transmission'   => $fkTransmission,
+						'superpdp_event_id' => (int) $ev['id'],
+						'status_code'       => (string) $ev['status_code'],
+						'message'           => !empty($ev['message']) ? (string) $ev['message'] : null,
+						'direction'         => LemonSuperPDPEvent::DIRECTION_IN,
+						'event_date'        => !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now(),
+						'payload_raw'       => json_encode($ev),
+					), $user, $fkFacture > 0 ? $fkFacture : null);
+
+					if ($inserted > 0) {
 						$nbInserted++;
 						$touchedTransmissions[$fkTransmission] = true;
 					}
@@ -155,17 +157,6 @@ class LemonSuperPDPCron
 	{
 		if (empty($fkTransmissions)) return;
 
-		$map = array(
-			'fr:200' => LemonSuperPDPTransmission::STATUS_SENT,
-			'fr:202' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
-			'fr:204' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
-			'fr:206' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
-			'fr:212' => LemonSuperPDPTransmission::STATUS_PAID,
-			'fr:201' => LemonSuperPDPTransmission::STATUS_REFUSED,
-			'fr:203' => LemonSuperPDPTransmission::STATUS_REFUSED,
-			'fr:210' => LemonSuperPDPTransmission::STATUS_REFUSED,
-		);
-
 		foreach ($fkTransmissions as $fkT) {
 			$sql = "SELECT status_code FROM ".MAIN_DB_PREFIX."lemonsuperpdp_event";
 			$sql .= " WHERE fk_transmission = ".((int) $fkT);
@@ -179,8 +170,9 @@ class LemonSuperPDPCron
 			$t = new LemonSuperPDPTransmission($this->db);
 			if ($t->fetch($fkT) <= 0) continue;
 			$t->status_raw = $row->status_code;
-			if (isset($map[$row->status_code])) {
-				$t->status = $map[$row->status_code];
+			$mapped = LemonSuperPDPTransmission::mapStatusFromEventCode($row->status_code);
+			if ($mapped !== null) {
+				$t->status = $mapped;
 			}
 			$t->update($user);
 		}

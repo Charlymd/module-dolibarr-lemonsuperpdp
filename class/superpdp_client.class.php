@@ -121,7 +121,9 @@ class SuperPDPClient
 		}
 
 		if ($httpCode !== 200) {
-			dol_syslog('SuperPDPClient::refreshAccessToken HTTP '.$httpCode.' : '.$response, LOG_ERR);
+			// On ne logue PAS la réponse brute ici : elle peut contenir un
+			// access_token partiel en cas de bug côté API.
+			dol_syslog('SuperPDPClient::refreshAccessToken HTTP '.$httpCode, LOG_ERR);
 			throw new SuperPDPException('Échec d\'authentification OAuth (HTTP '.$httpCode.')', $httpCode, $response);
 		}
 
@@ -263,7 +265,10 @@ class SuperPDPClient
 		}
 
 		if ($httpCode < 200 || $httpCode >= 300) {
-			dol_syslog('SuperPDPClient::request HTTP '.$httpCode.' : '.$response, LOG_ERR);
+			// Tronque à 500 chars pour éviter de pourrir les logs avec des
+			// réponses massives et pour limiter le risque de fuite de tokens
+			// inclus dans un payload d'erreur inhabituel.
+			dol_syslog('SuperPDPClient::request HTTP '.$httpCode.' : '.dol_trunc((string) $response, 500), LOG_ERR);
 			$msg = 'Erreur API SUPER PDP (HTTP '.$httpCode.')';
 			$decoded = json_decode($response, true);
 			if (is_array($decoded) && !empty($decoded['message'])) {

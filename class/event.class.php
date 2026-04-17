@@ -92,6 +92,45 @@ class LemonSuperPDPEvent extends CommonObject
 	}
 
 	/**
+	 * Helper de création : instancie un event avec les champs passés en
+	 * tableau, l'enregistre en base puis crée l'action agenda associée
+	 * si un fkFacture est fourni. Centralise le pattern répété par les
+	 * hooks, le cron, le trigger et l'envoi manuel.
+	 *
+	 * Champs attendus dans $attrs :
+	 *   fk_transmission (int, requis)
+	 *   status_code (string, requis)
+	 *   direction (string, DIRECTION_IN|DIRECTION_OUT, requis)
+	 *   superpdp_event_id (int, optionnel)
+	 *   message (string, optionnel)
+	 *   event_date (timestamp, optionnel, défaut dol_now())
+	 *   payload_raw (string, optionnel)
+	 *
+	 * @param DoliDB    $db         Connexion base
+	 * @param array     $attrs      Champs de l'event
+	 * @param User      $user       Utilisateur courant
+	 * @param int|null  $fkFacture  Facture cible pour l'action agenda (null = pas d'action)
+	 * @return int                  ID créé (>0) ou <=0 si échec de l'insert
+	 */
+	public static function createAndLog($db, array $attrs, $user, $fkFacture = null)
+	{
+		$ev = new self($db);
+		$ev->fk_transmission = isset($attrs['fk_transmission']) ? (int) $attrs['fk_transmission'] : 0;
+		$ev->superpdp_event_id = isset($attrs['superpdp_event_id']) ? (int) $attrs['superpdp_event_id'] : null;
+		$ev->status_code = isset($attrs['status_code']) ? (string) $attrs['status_code'] : '';
+		$ev->message = isset($attrs['message']) ? $attrs['message'] : null;
+		$ev->direction = isset($attrs['direction']) ? $attrs['direction'] : self::DIRECTION_IN;
+		$ev->event_date = isset($attrs['event_date']) ? $attrs['event_date'] : dol_now();
+		$ev->payload_raw = isset($attrs['payload_raw']) ? $attrs['payload_raw'] : null;
+
+		$ret = $ev->create($user);
+		if ($ret > 0 && !empty($fkFacture)) {
+			$ev->createActionComm((int) $fkFacture, $user);
+		}
+		return $ret;
+	}
+
+	/**
 	 * Retourne true si un event avec cet id SUPER PDP existe déjà en base
 	 * (utilisé par le cron de polling pour éviter les doublons).
 	 */

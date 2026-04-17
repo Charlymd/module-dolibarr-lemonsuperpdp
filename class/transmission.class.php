@@ -44,6 +44,66 @@ class LemonSuperPDPTransmission extends CommonObject
 		$this->db = $db;
 	}
 
+	/**
+	 * Table de correspondance status_code AFNOR (fr:200..fr:212) vers
+	 * status local de la transmission. Utilisée par le cron de polling
+	 * et par le rafraîchissement manuel depuis la fiche facture pour
+	 * garder une source unique de vérité.
+	 *
+	 * @param string $statusCode  Code AFNOR (ex : 'fr:212')
+	 * @return string|null        Statut local correspondant ou null si non mappé
+	 */
+	public static function mapStatusFromEventCode($statusCode)
+	{
+		$map = array(
+			'fr:200' => self::STATUS_SENT,
+			'fr:202' => self::STATUS_ACCEPTED,
+			'fr:204' => self::STATUS_ACCEPTED,
+			'fr:206' => self::STATUS_ACCEPTED,
+			'fr:212' => self::STATUS_PAID,
+			'fr:201' => self::STATUS_REFUSED,
+			'fr:203' => self::STATUS_REFUSED,
+			'fr:210' => self::STATUS_REFUSED,
+		);
+		return isset($map[$statusCode]) ? $map[$statusCode] : null;
+	}
+
+	/**
+	 * Ventile les lignes d'une facture par taux de TVA et produit le tableau
+	 * "amounts" attendu par l'API SUPER PDP pour les events de paiement
+	 * (fr:207, fr:212...).
+	 *
+	 * @param Facture $facture     Facture Dolibarr (fetch_lines() fait si besoin)
+	 * @param string  $paymentDate Date au format Y-m-d
+	 * @return array               Liste conforme au schéma SUPER PDP
+	 */
+	public static function buildAmountsByVatRate($facture, $paymentDate)
+	{
+		if (empty($facture->lines)) {
+			$facture->fetch_lines();
+		}
+		$amountsByRate = array();
+		foreach ($facture->lines as $line) {
+			$rate = (float) $line->tva_tx;
+			$key = number_format($rate, 1, '.', '');
+			if (!isset($amountsByRate[$key])) {
+				$amountsByRate[$key] = 0.0;
+			}
+			$amountsByRate[$key] += (float) $line->total_ht;
+		}
+		$amounts = array();
+		foreach ($amountsByRate as $rate => $netAmount) {
+			$amounts[] = array(
+				'net_amount' => number_format($netAmount, 2, '.', ''),
+				'currency_code' => 'EUR',
+				'type_code' => 'MEN',
+				'vat_rate' => $rate,
+				'date' => $paymentDate,
+			);
+		}
+		return $amounts;
+	}
+
 	private function _setFromRow($obj)
 	{
 		$this->id = $obj->rowid;
@@ -185,12 +245,38 @@ class LemonSuperPDPTransmission extends CommonObject
 	}
 
 	/**
-	 * Supprime toutes les transmissions d'une facture donnée (utile pour
-	 * réinitialiser l'état en phase de test sandbox).
+	 * Supprime toutes les transmissions d'une facture donnée, ainsi que leurs
+	 * events associés (cascade manuelle, pas de FK SQL). Utile pour
+	 * réinitialiser l'état en phase de test sandbox.
+	 *
+	 * @param int $fkFacture
+	 * @return int  Nombre de transmissions supprimées, ou -1 en cas d'erreur
 	 */
 	public function deleteAllForFacture($fkFacture)
 	{
 		global $conf;
+
+		// Récupère d'abord les rowids pour supprimer les events associés
+		$sqlIds = "SELECT rowid FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
+		$sqlIds .= " WHERE fk_facture = ".((int) $fkFacture);
+		$sqlIds .= " AND entity = ".((int) $conf->entity);
+		$resIds = $this->db->query($sqlIds);
+		$transmissionIds = array();
+		if ($resIds) {
+			while ($row = $this->db->fetch_object($resIds)) {
+				$transmissionIds[] = (int) $row->rowid;
+			}
+			$this->db->free($resIds);
+		}
+
+		if (!empty($transmissionIds)) {
+			require_once dirname(__FILE__).'/event.class.php';
+			$evObj = new LemonSuperPDPEvent($this->db);
+			foreach ($transmissionIds as $tid) {
+				$evObj->deleteAllForTransmission($tid);
+			}
+		}
+
 		$sql = "DELETE FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
 		$sql .= " WHERE fk_facture = ".((int) $fkFacture);
 		$sql .= " AND entity = ".((int) $conf->entity);

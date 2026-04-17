@@ -70,6 +70,53 @@ class ActionsLemonSuperPDP
 	}
 
 	/**
+	 * Garde-fou commun à tous les hooks du module : module activé, option
+	 * globale à ON, contexte hook attendu, objet de type facture.
+	 *
+	 * @param array    $parameters      Paramètres du hook courant
+	 * @param object   $object          Objet courant du hook
+	 * @param string[] $allowedContexts Contextes hook acceptés (ex: ['invoicecard'])
+	 * @return bool                     true si on peut continuer, false sinon
+	 */
+	private function isInvoiceContextAllowed($parameters, $object, array $allowedContexts)
+	{
+		if (!isModEnabled('lemonsuperpdp')) return false;
+		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return false;
+
+		$contexts = explode(':', $parameters['context']);
+		if (empty(array_intersect($allowedContexts, $contexts))) return false;
+
+		if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return false;
+
+		return true;
+	}
+
+	/**
+	 * Vérifie CSRF + permission et renvoie vrai si tout est OK. Si non,
+	 * pose un setEventMessages d'erreur et réinitialise $action.
+	 *
+	 * @param string $action      Action courante (passée par référence, vidée sur échec)
+	 * @param string $right       Code de permission ('ecrire' ou 'lire')
+	 * @return bool               true si OK, false si refus
+	 */
+	private function checkCsrfAndRight(&$action, $right)
+	{
+		global $langs, $user;
+
+		if (GETPOST('token', 'alpha') != newToken()) {
+			setEventMessages('Bad CSRF token', null, 'errors');
+			$action = '';
+			return false;
+		}
+		if (!$user->hasRight('lemonsuperpdp', 'transmission', $right)) {
+			setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
+			$action = '';
+			return false;
+		}
+		return true;
+	}
+
+	/**
 	 * Affiche le badge de statut courant + le bouton d'envoi sur la fiche facture.
 	 *
 	 * @param array    $parameters   Contextes et paramètres
@@ -82,12 +129,7 @@ class ActionsLemonSuperPDP
 	{
 		global $langs, $user;
 
-		if (!isModEnabled('lemonsuperpdp')) return 0;
-		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return 0;
-
-		$contexts = explode(':', $parameters['context']);
-		if (!in_array('invoicecard', $contexts)) return 0;
-		if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
+		if (!$this->isInvoiceContextAllowed($parameters, $object, array('invoicecard'))) return 0;
 
 		$langs->load("lemonsuperpdp@lemonsuperpdp");
 
@@ -125,12 +167,7 @@ class ActionsLemonSuperPDP
 	{
 		global $langs;
 
-		if (!isModEnabled('lemonsuperpdp')) return 0;
-		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return 0;
-
-		$contexts = explode(':', $parameters['context']);
-		if (!in_array('invoicecard', $contexts)) return 0;
-		if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
+		if (!$this->isInvoiceContextAllowed($parameters, $object, array('invoicecard'))) return 0;
 
 		$langs->load("lemonsuperpdp@lemonsuperpdp");
 
@@ -260,6 +297,12 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 	}
 
 	/**
+	 * Remarque : on ne passe pas par isInvoiceContextAllowed() ici parce que
+	 * le contexte invoicelist transporte un objet liste (pas une facture),
+	 * donc le test object->element !== 'facture' invaliderait toujours le hook.
+	 */
+
+	/**
 	 * Traite l'action en masse "Envoyer via SUPER PDP" sur les factures sélectionnées.
 	 */
 	public function doMassActions($parameters, &$object, &$action, $hookmanager)
@@ -333,118 +376,120 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 	}
 
 	/**
-	 * Intercepte les actions du module : dosendsuperpdp (envoi) et
-	 * resettransmissionsuperpdp (reset sandbox).
+	 * Intercepte les actions du module : dosendsuperpdp (envoi),
+	 * refreshsuperpdpevents (rafraîchir events), sendstatussuperpdp
+	 * (émettre un statut manuel) et resettransmissionsuperpdp (reset sandbox).
 	 */
 	public function doActions($parameters, &$object, &$action, $hookmanager)
 	{
-		global $langs, $user, $conf;
+		global $langs;
 
-		// Action : rafraîchir les events SUPER PDP pour la facture courante.
-		if ($action === 'refreshsuperpdpevents') {
-			if (!isModEnabled('lemonsuperpdp')) return 0;
-			if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
-			$langs->load("lemonsuperpdp@lemonsuperpdp");
-			if (GETPOST('token', 'alpha') != newToken()) {
-				setEventMessages('Bad CSRF token', null, 'errors');
-				$action = '';
-				return 0;
-			}
-			if (!$user->hasRight('lemonsuperpdp', 'transmission', 'lire')) {
-				setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
-				$action = '';
-				return 0;
-			}
-			try {
-				$nb = $this->refreshEventsForFacture($object, $user);
-				setEventMessages($langs->trans('LemonSuperPDPRefreshDone', (int) $nb), null, 'mesgs');
-			} catch (Exception $e) {
-				dol_syslog('LemonSuperPDP refresh events: '.$e->getMessage(), LOG_ERR);
-				setEventMessages($langs->trans('LemonSuperPDPRefreshError').' — '.$e->getMessage(), null, 'errors');
-			}
-			$action = '';
+		// Les 4 actions exigent toutes module activé + objet facture.
+		if (!in_array($action, array('refreshsuperpdpevents', 'sendstatussuperpdp', 'resettransmissionsuperpdp', 'dosendsuperpdp'), true)) {
 			return 0;
 		}
-
-		// Action : envoyer un statut de cycle de vie (fr:204..fr:212).
-		if ($action === 'sendstatussuperpdp') {
-			if (!isModEnabled('lemonsuperpdp')) return 0;
-			if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
-			$langs->load("lemonsuperpdp@lemonsuperpdp");
-			if (GETPOST('token', 'alpha') != newToken()) {
-				setEventMessages('Bad CSRF token', null, 'errors');
-				$action = '';
-				return 0;
-			}
-			if (!$user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
-				setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
-				$action = '';
-				return 0;
-			}
-			$statusCode = GETPOST('status_code', 'alphanohtml');
-			dol_include_once('/lemonsuperpdp/class/event.class.php');
-			if (!in_array($statusCode, LemonSuperPDPEvent::getEmittableStatuses(), true)) {
-				setEventMessages($langs->trans('LemonSuperPDPStatusInvalid').' : '.dol_escape_htmltag($statusCode), null, 'errors');
-				$action = '';
-				return 0;
-			}
-			try {
-				$this->sendManualStatus($object, $user, $statusCode);
-				setEventMessages($langs->trans('LemonSuperPDPStatusSent').' : '.$statusCode, null, 'mesgs');
-			} catch (Exception $e) {
-				dol_syslog('LemonSuperPDP send status: '.$e->getMessage(), LOG_ERR);
-				setEventMessages($langs->trans('LemonSuperPDPStatusSendError').' — '.$e->getMessage(), null, 'errors');
-			}
-			$action = '';
-			return 0;
-		}
-
-		// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
-		if ($action === 'resettransmissionsuperpdp') {
-			if (!isModEnabled('lemonsuperpdp')) return 0;
-			if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
-			$langs->load("lemonsuperpdp@lemonsuperpdp");
-			if (GETPOST('token', 'alpha') != newToken()) {
-				setEventMessages('Bad CSRF token', null, 'errors');
-				$action = '';
-				return 0;
-			}
-			if (!$user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
-				setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
-				$action = '';
-				return 0;
-			}
-			dol_include_once('/lemonsuperpdp/class/transmission.class.php');
-			$t = new LemonSuperPDPTransmission($this->db);
-			$nb = $t->deleteAllForFacture($object->id);
-			if ($nb < 0) {
-				setEventMessages($langs->trans('LemonSuperPDPResetError'), null, 'errors');
-			} else {
-				setEventMessages($langs->trans('LemonSuperPDPResetDone', (int) $nb), null, 'mesgs');
-			}
-			$action = '';
-			return 0;
-		}
-		// >>> FIN SANDBOX MODE <<<
-
-		if ($action !== 'dosendsuperpdp') return 0;
 		if (!isModEnabled('lemonsuperpdp')) return 0;
-		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return 0;
 		if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
-
 		$langs->load("lemonsuperpdp@lemonsuperpdp");
 
-		if (GETPOST('token', 'alpha') != newToken()) {
-			setEventMessages('Bad CSRF token', null, 'errors');
-			$action = '';
-			return 0;
+		switch ($action) {
+			case 'refreshsuperpdpevents':
+				return $this->handleRefreshEvents($object, $action);
+			case 'sendstatussuperpdp':
+				return $this->handleSendStatus($object, $action);
+			// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+			case 'resettransmissionsuperpdp':
+				return $this->handleResetTransmission($object, $action);
+			// >>> FIN SANDBOX MODE <<<
+			case 'dosendsuperpdp':
+				// dosendsuperpdp exige aussi le flag global actif.
+				if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return 0;
+				return $this->handleSendInvoice($object, $action);
 		}
 
-		if (!$user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
-			setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
+		return 0;
+	}
+
+	/**
+	 * Rafraîchit les events SUPER PDP pour la facture courante depuis la fiche.
+	 */
+	private function handleRefreshEvents(&$object, &$action)
+	{
+		global $langs, $user;
+
+		if (!$this->checkCsrfAndRight($action, 'lire')) return 0;
+		try {
+			$nb = $this->refreshEventsForFacture($object, $user);
+			setEventMessages($langs->trans('LemonSuperPDPRefreshDone', (int) $nb), null, 'mesgs');
+		} catch (Exception $e) {
+			dol_syslog('LemonSuperPDP refresh events: '.$e->getMessage(), LOG_ERR);
+			setEventMessages($langs->trans('LemonSuperPDPRefreshError').' — '.$e->getMessage(), null, 'errors');
+		}
+		$action = '';
+		return 0;
+	}
+
+	/**
+	 * Émet manuellement un statut de cycle de vie (fr:204..fr:212).
+	 */
+	private function handleSendStatus(&$object, &$action)
+	{
+		global $langs, $user;
+
+		if (!$this->checkCsrfAndRight($action, 'ecrire')) return 0;
+
+		$statusCode = GETPOST('status_code', 'alphanohtml');
+		dol_include_once('/lemonsuperpdp/class/event.class.php');
+		if (!in_array($statusCode, LemonSuperPDPEvent::getEmittableStatuses(), true)) {
+			setEventMessages($langs->trans('LemonSuperPDPStatusInvalid').' : '.dol_escape_htmltag($statusCode), null, 'errors');
 			$action = '';
 			return 0;
 		}
+		try {
+			$this->sendManualStatus($object, $user, $statusCode);
+			setEventMessages($langs->trans('LemonSuperPDPStatusSent').' : '.$statusCode, null, 'mesgs');
+		} catch (Exception $e) {
+			dol_syslog('LemonSuperPDP send status: '.$e->getMessage(), LOG_ERR);
+			setEventMessages($langs->trans('LemonSuperPDPStatusSendError').' — '.$e->getMessage(), null, 'errors');
+		}
+		$action = '';
+		return 0;
+	}
+
+	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+	/**
+	 * Réinitialise toutes les transmissions d'une facture (utilitaire sandbox
+	 * uniquement, pas pour la prod : en prod réelle, on émet un avoir).
+	 */
+	private function handleResetTransmission(&$object, &$action)
+	{
+		global $langs;
+
+		if (!$this->checkCsrfAndRight($action, 'ecrire')) return 0;
+
+		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
+		$t = new LemonSuperPDPTransmission($this->db);
+		$nb = $t->deleteAllForFacture($object->id);
+		if ($nb < 0) {
+			setEventMessages($langs->trans('LemonSuperPDPResetError'), null, 'errors');
+		} else {
+			setEventMessages($langs->trans('LemonSuperPDPResetDone', (int) $nb), null, 'mesgs');
+		}
+		$action = '';
+		return 0;
+	}
+	// >>> FIN SANDBOX MODE <<<
+
+	/**
+	 * Envoie la facture à SUPER PDP via POST /v1.beta/invoices et enregistre
+	 * la transmission résultante (succès, récupération d'un cas "déjà
+	 * existante", ou erreur).
+	 */
+	private function handleSendInvoice(&$object, &$action)
+	{
+		global $langs, $user;
+
+		if (!$this->checkCsrfAndRight($action, 'ecrire')) return 0;
 
 		if (((int) $object->statut) < 1) {
 			setEventMessages($langs->trans('LemonSuperPDPSendInvoiceDraft'), null, 'errors');
@@ -475,8 +520,7 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 		$t->fk_facture = $object->id;
 		$t->format_sent = $format;
 		$t->status = LemonSuperPDPTransmission::STATUS_PENDING;
-		$ret = $t->create($user);
-		if ($ret < 0) {
+		if ($t->create($user) < 0) {
 			dol_syslog('LemonSuperPDP: erreur création transmission : '.$t->error, LOG_ERR);
 			setEventMessages($langs->trans('LemonSuperPDPCreateError'), null, 'errors');
 			$action = '';
@@ -686,16 +730,16 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			if (empty($ev['id']) || empty($ev['status_code'])) continue;
 			if ($evObj->existsBySuperpdpId((int) $ev['id'])) continue;
 
-			$newEv = new LemonSuperPDPEvent($this->db);
-			$newEv->fk_transmission = $t->id;
-			$newEv->superpdp_event_id = (int) $ev['id'];
-			$newEv->status_code = (string) $ev['status_code'];
-			$newEv->message = !empty($ev['message']) ? (string) $ev['message'] : null;
-			$newEv->direction = LemonSuperPDPEvent::DIRECTION_IN;
-			$newEv->event_date = !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now();
-			$newEv->payload_raw = json_encode($ev);
-			if ($newEv->create($user) > 0) {
-				$newEv->createActionComm($facture->id, $user);
+			$inserted = LemonSuperPDPEvent::createAndLog($this->db, array(
+				'fk_transmission'   => $t->id,
+				'superpdp_event_id' => (int) $ev['id'],
+				'status_code'       => (string) $ev['status_code'],
+				'message'           => !empty($ev['message']) ? (string) $ev['message'] : null,
+				'direction'         => LemonSuperPDPEvent::DIRECTION_IN,
+				'event_date'        => !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now(),
+				'payload_raw'       => json_encode($ev),
+			), $user, $facture->id);
+			if ($inserted > 0) {
 				$nbInserted++;
 			}
 		}
@@ -712,18 +756,9 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 				}
 			}
 			if (!empty($lastCode)) {
-				$map = array(
-					'fr:200' => LemonSuperPDPTransmission::STATUS_SENT,
-					'fr:202' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
-					'fr:204' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
-					'fr:206' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
-					'fr:212' => LemonSuperPDPTransmission::STATUS_PAID,
-					'fr:201' => LemonSuperPDPTransmission::STATUS_REFUSED,
-					'fr:203' => LemonSuperPDPTransmission::STATUS_REFUSED,
-					'fr:210' => LemonSuperPDPTransmission::STATUS_REFUSED,
-				);
-				if (isset($map[$lastCode])) {
-					$t->status = $map[$lastCode];
+				$mapped = LemonSuperPDPTransmission::mapStatusFromEventCode($lastCode);
+				if ($mapped !== null) {
+					$t->status = $mapped;
 				}
 				$t->status_raw = $lastCode;
 				$t->update($user);
@@ -751,46 +786,22 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 
 		$details = array();
 		if ($statusCode === 'fr:212' || $statusCode === 'fr:207') {
-			if (empty($facture->lines)) {
-				$facture->fetch_lines();
-			}
-			$amountsByRate = array();
-			foreach ($facture->lines as $line) {
-				$rate = (float) $line->tva_tx;
-				$key = number_format($rate, 1, '.', '');
-				if (!isset($amountsByRate[$key])) {
-					$amountsByRate[$key] = 0.0;
-				}
-				$amountsByRate[$key] += (float) $line->total_ht;
-			}
-			$today = date('Y-m-d');
-			$amounts = array();
-			foreach ($amountsByRate as $rate => $netAmount) {
-				$amounts[] = array(
-					'net_amount' => number_format($netAmount, 2, '.', ''),
-					'currency_code' => 'EUR',
-					'type_code' => 'MEN',
-					'vat_rate' => $rate,
-					'date' => $today,
-				);
-			}
+			$amounts = LemonSuperPDPTransmission::buildAmountsByVatRate($facture, date('Y-m-d'));
 			$details = array(array('amounts' => $amounts));
 		}
 
 		$client = new SuperPDPClient($this->db);
 		$response = $client->submitEvent((int) $t->superpdp_id, $statusCode, $details);
 
-		$ev = new LemonSuperPDPEvent($this->db);
-		$ev->fk_transmission = $t->id;
-		$ev->superpdp_event_id = !empty($response['id']) ? (int) $response['id'] : null;
-		$ev->status_code = $statusCode;
-		$ev->message = LemonSuperPDPEvent::getStatusLabel($statusCode);
-		$ev->direction = LemonSuperPDPEvent::DIRECTION_OUT;
-		$ev->event_date = dol_now();
-		$ev->payload_raw = json_encode($response);
-		if ($ev->create($user) > 0) {
-			$ev->createActionComm($facture->id, $user);
-		}
+		LemonSuperPDPEvent::createAndLog($this->db, array(
+			'fk_transmission'   => $t->id,
+			'superpdp_event_id' => !empty($response['id']) ? (int) $response['id'] : null,
+			'status_code'       => $statusCode,
+			'message'           => LemonSuperPDPEvent::getStatusLabel($statusCode),
+			'direction'         => LemonSuperPDPEvent::DIRECTION_OUT,
+			'event_date'        => dol_now(),
+			'payload_raw'       => json_encode($response),
+		), $user, $facture->id);
 
 		if ($statusCode === 'fr:212') {
 			$t->status = LemonSuperPDPTransmission::STATUS_PAID;

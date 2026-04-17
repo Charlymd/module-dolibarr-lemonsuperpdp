@@ -85,20 +85,6 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 			return;
 		}
 
-		// Construction des détails : montants par taux de TVA.
-		if (empty($facture->lines)) {
-			$facture->fetch_lines();
-		}
-		$amountsByRate = array();
-		foreach ($facture->lines as $line) {
-			$rate = (float) $line->tva_tx;
-			$key = number_format($rate, 1, '.', '');
-			if (!isset($amountsByRate[$key])) {
-				$amountsByRate[$key] = 0.0;
-			}
-			$amountsByRate[$key] += (float) $line->total_ht;
-		}
-
 		// Date d'encaissement : on prend la date du dernier paiement si dispo,
 		// sinon la date du jour.
 		$paymentDate = date('Y-m-d');
@@ -111,34 +97,22 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 			$this->db->free($resql);
 		}
 
-		$amounts = array();
-		foreach ($amountsByRate as $rate => $netAmount) {
-			$amounts[] = array(
-				'net_amount' => number_format($netAmount, 2, '.', ''),
-				'currency_code' => 'EUR',
-				'type_code' => 'MEN',
-				'vat_rate' => $rate,
-				'date' => $paymentDate,
-			);
-		}
-
+		$amounts = LemonSuperPDPTransmission::buildAmountsByVatRate($facture, $paymentDate);
 		$details = array(array('amounts' => $amounts));
 
 		$client = new SuperPDPClient($this->db);
 		$response = $client->submitEvent((int) $t->superpdp_id, 'fr:212', $details);
 
 		// Enregistre l'event dans la table locale.
-		$ev = new LemonSuperPDPEvent($this->db);
-		$ev->fk_transmission = $t->id;
-		$ev->superpdp_event_id = !empty($response['id']) ? (int) $response['id'] : null;
-		$ev->status_code = 'fr:212';
-		$ev->message = 'Encaissée';
-		$ev->direction = LemonSuperPDPEvent::DIRECTION_OUT;
-		$ev->event_date = dol_now();
-		$ev->payload_raw = json_encode($response);
-		if ($ev->create($user) > 0) {
-			$ev->createActionComm($facture->id, $user);
-		}
+		LemonSuperPDPEvent::createAndLog($this->db, array(
+			'fk_transmission'   => $t->id,
+			'superpdp_event_id' => !empty($response['id']) ? (int) $response['id'] : null,
+			'status_code'       => 'fr:212',
+			'message'           => 'Encaissée',
+			'direction'         => LemonSuperPDPEvent::DIRECTION_OUT,
+			'event_date'        => dol_now(),
+			'payload_raw'       => json_encode($response),
+		), $user, $facture->id);
 
 		// Met à jour le statut de la transmission.
 		$t->status = LemonSuperPDPTransmission::STATUS_PAID;
