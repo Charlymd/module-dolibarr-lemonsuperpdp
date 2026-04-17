@@ -14,26 +14,26 @@ LemonSuperPDPSetup = Configuration LemonSuperPDP
 # Setup - champs
 LemonSuperPDPEnabled = Activer la transmission SUPER PDP
 LemonSuperPDPEndpoint = URL de l'API
-LemonSuperPDPEndpointHelp = https://api.superpdp.tech pour la production et le bac à sable.
+LemonSuperPDPEndpointHelp = <a href="https://api.superpdp.tech" target="_blank" rel="noopener">https://api.superpdp.tech</a> pour la production et le bac à sable.
 LemonSuperPDPClientId = Identifiant OAuth (client_id)
 LemonSuperPDPClientSecret = Secret OAuth (client_secret)
 LemonSuperPDPClientSecretKeep = Laisser tel quel pour conserver la valeur existante
-LemonSuperPDPClientSecretHelp = À récupérer dans l'interface SUPER PDP : Applications > Nouvelle application. Le secret n'est affiché qu'une seule fois.
+LemonSuperPDPClientSecretHelp = À récupérer dans l'interface <a href="https://www.superpdp.tech/app" target="_blank" rel="noopener">SUPER PDP</a> : Applications > Nouvelle application. Le secret n'est affiché qu'une seule fois.
 LemonSuperPDPFormat = Format d'envoi par défaut
-LemonSuperPDPFormatHelp = Factur-X recommandé : vous bénéficiez ainsi du PDF lisible généré par LemonFacturX avec le XML CII embarqué.
+LemonSuperPDPFormatHelp = Factur-X recommandé : vous bénéficiez ainsi du PDF lisible généré par <a href="%s/custom/lemonfacturx/admin/setup.php" target="_blank" rel="noopener">LemonFacturX</a> avec le XML CII embarqué.
 
 # Setup - boutons / actions
 LemonSuperPDPTestConnection = Tester la connexion
 LemonSuperPDPTestSuccess = Connexion SUPER PDP réussie
 LemonSuperPDPTestError = Échec de la connexion SUPER PDP
 LemonSuperPDPCompanyName = Dénomination sociale
-LemonSuperPDPInfo = LemonSuperPDP utilise l'API SUPER PDP pour transmettre vos factures clients via la Plateforme Agréée. Les identifiants OAuth sont à créer dans votre compte SUPER PDP, section Applications.
+LemonSuperPDPInfo = LemonSuperPDP utilise l'API <a href="https://www.superpdp.tech" target="_blank" rel="noopener">SUPER PDP</a> pour transmettre vos factures clients via la Plateforme Agréée. Les identifiants OAuth sont à créer dans votre compte SUPER PDP, section <a href="https://www.superpdp.tech/app" target="_blank" rel="noopener">Applications</a>.
 
 # Diagnostic
 LemonSuperPDPDiagTitle = Diagnostic
 LemonSuperPDPDiagResults = Résultat du diagnostic
-LemonSuperPDPDiagFacturXEnabled = Module LemonFacturX activé
-LemonSuperPDPDiagFacturXDisabled = Module LemonFacturX requis mais non activé
+LemonSuperPDPDiagFacturXEnabled = Module <a href="%s/custom/lemonfacturx/admin/setup.php" target="_blank" rel="noopener">LemonFacturX</a> activé
+LemonSuperPDPDiagFacturXDisabled = Module <a href="%s/admin/modules.php" target="_blank" rel="noopener">LemonFacturX</a> requis mais non activé
 LemonSuperPDPDiagCredentialsSet = Identifiants OAuth renseignés
 LemonSuperPDPDiagCredentialsMissing = Identifiants OAuth manquants (client_id et/ou client_secret)
 LemonSuperPDPDiagSellerSIRET = SIRET de votre société
@@ -50,5 +50,17 @@ LemonSuperPDPStatusError = Erreur
 
 # Actions
 LemonSuperPDPSendInvoice = Envoyer via SUPER PDP
+LemonSuperPDPSendInvoiceTooltip = Transmettre cette facture via la Plateforme Agréée SUPER PDP
+LemonSuperPDPSendInvoiceDraft = La facture doit être validée avant d'être transmise
 LemonSuperPDPSendSelected = Envoyer la sélection via SUPER PDP
 LemonSuperPDPRefreshStatus = Rafraîchir le statut
+LemonSuperPDPSendSuccess = Facture transmise avec succès à SUPER PDP
+LemonSuperPDPSendError = Échec de la transmission à SUPER PDP
+LemonSuperPDPAlreadySent = Cette facture a déjà été transmise avec succès
+LemonSuperPDPPdfNotFound = PDF de la facture introuvable. Générez le PDF avant d'envoyer
+LemonSuperPDPCreateError = Impossible d'enregistrer la transmission en base
+
+# Fiche facture (bloc latéral)
+LemonSuperPDPTransmissionLabel = Transmission SUPER PDP
+LemonSuperPDPNotTransmitted = Non transmise
+LemonSuperPDPSentOn = Envoyée le

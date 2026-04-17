@@ -34,9 +34,6 @@ $langs->loadLangs(["admin", "lemonsuperpdp@lemonsuperpdp"]);
 
 $action = GETPOST('action', 'aZ09');
 
-$testResult = null;
-$testError = null;
-
 // Sauvegarde des paramètres
 if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	if (GETPOST('token', 'alpha') != newToken()) {
@@ -94,13 +91,26 @@ if ($action == 'testconn') {
 	try {
 		$client = new SuperPDPClient($db);
 		$testResult = $client->testConnection();
-	} catch (SuperPDPException $e) {
-		$testError = $e->getMessage();
-		if ($e->responseBody) {
-			$testError .= ' — '.dol_trunc($e->responseBody, 400);
+		$msg = $langs->trans("LemonSuperPDPTestSuccess");
+		$details = array();
+		if (!empty($testResult['formal_name'])) {
+			$details[] = $langs->trans("LemonSuperPDPCompanyName").' : '.dol_escape_htmltag($testResult['formal_name']);
 		}
+		if (!empty($testResult['siren'])) {
+			$details[] = 'SIREN : '.dol_escape_htmltag($testResult['siren']);
+		}
+		if (!empty($details)) {
+			$msg .= ' — '.implode(' — ', $details);
+		}
+		setEventMessages($msg, null, 'mesgs');
+	} catch (SuperPDPException $e) {
+		$err = $langs->trans("LemonSuperPDPTestError").' — '.$e->getMessage();
+		if ($e->responseBody) {
+			$err .= ' — '.dol_trunc($e->responseBody, 400);
+		}
+		setEventMessages($err, null, 'errors');
 	} catch (Exception $e) {
-		$testError = $e->getMessage();
+		setEventMessages($langs->trans("LemonSuperPDPTestError").' — '.$e->getMessage(), null, 'errors');
 	}
 }
 
@@ -109,25 +119,6 @@ llxHeader('', $langs->trans("LemonSuperPDPSetup"));
 
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
 print load_fiche_titre($langs->trans("LemonSuperPDPSetup"), $linkback, 'title_setup');
-
-// Résultat du test
-if ($testResult !== null) {
-	print '<div class="ok">';
-	print '<strong>'.$langs->trans("LemonSuperPDPTestSuccess").'</strong><br>';
-	if (!empty($testResult['formal_name'])) {
-		print $langs->trans("LemonSuperPDPCompanyName").' : '.dol_escape_htmltag($testResult['formal_name']).'<br>';
-	}
-	if (!empty($testResult['siren'])) {
-		print 'SIREN : '.dol_escape_htmltag($testResult['siren']).'<br>';
-	}
-	print '</div>';
-}
-if ($testError !== null) {
-	print '<div class="error">';
-	print '<strong>'.$langs->trans("LemonSuperPDPTestError").'</strong><br>';
-	print dol_escape_htmltag($testError);
-	print '</div>';
-}
 
 print '<form method="POST" action="'.dol_escape_htmltag($_SERVER["PHP_SELF"]).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
@@ -188,7 +179,7 @@ print '<option value="facturx"'.($currentFormat == 'facturx' ? ' selected' : '')
 print '<option value="ubl"'.($currentFormat == 'ubl' ? ' selected' : '').'>UBL France (XML)</option>';
 print '<option value="cii"'.($currentFormat == 'cii' ? ' selected' : '').'>CII France (XML)</option>';
 print '</select>';
-print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPFormatHelp").'</span>';
+print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPFormatHelp", DOL_URL_ROOT).'</span>';
 print '</td>';
 print '</tr>';
 
@@ -226,9 +217,9 @@ $diagOk = array();
 
 // LemonFacturX activé ?
 if (isModEnabled('lemonfacturx')) {
-	$diagOk[] = $langs->trans("LemonSuperPDPDiagFacturXEnabled");
+	$diagOk[] = $langs->trans("LemonSuperPDPDiagFacturXEnabled", DOL_URL_ROOT);
 } else {
-	$diagErrors[] = $langs->trans("LemonSuperPDPDiagFacturXDisabled");
+	$diagErrors[] = $langs->trans("LemonSuperPDPDiagFacturXDisabled", DOL_URL_ROOT);
 }
 
 // Identifiants OAuth renseignés ?
