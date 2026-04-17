@@ -1,0 +1,54 @@
+# Module LemonSuperPDP - Traductions françaises
+
+Module500240Name = LemonSuperPDP
+Module500240Desc = Transmission des factures via la Plateforme Agréée SUPER PDP
+
+# Permissions
+Permission50024001 = Envoyer une facture via SUPER PDP
+Permission50024002 = Consulter les transmissions SUPER PDP
+Permission50024091 = Administrer le module LemonSuperPDP
+
+# Setup - en-têtes
+LemonSuperPDPSetup = Configuration LemonSuperPDP
+
+# Setup - champs
+LemonSuperPDPEnabled = Activer la transmission SUPER PDP
+LemonSuperPDPEndpoint = URL de l'API
+LemonSuperPDPEndpointHelp = https://api.superpdp.tech pour la production et le bac à sable.
+LemonSuperPDPClientId = Identifiant OAuth (client_id)
+LemonSuperPDPClientSecret = Secret OAuth (client_secret)
+LemonSuperPDPClientSecretKeep = Laisser tel quel pour conserver la valeur existante
+LemonSuperPDPClientSecretHelp = À récupérer dans l'interface SUPER PDP : Applications > Nouvelle application. Le secret n'est affiché qu'une seule fois.
+LemonSuperPDPFormat = Format d'envoi par défaut
+LemonSuperPDPFormatHelp = Factur-X recommandé : vous bénéficiez ainsi du PDF lisible généré par LemonFacturX avec le XML CII embarqué.
+
+# Setup - boutons / actions
+LemonSuperPDPTestConnection = Tester la connexion
+LemonSuperPDPTestSuccess = Connexion SUPER PDP réussie
+LemonSuperPDPTestError = Échec de la connexion SUPER PDP
+LemonSuperPDPCompanyName = Dénomination sociale
+LemonSuperPDPInfo = LemonSuperPDP utilise l'API SUPER PDP pour transmettre vos factures clients via la Plateforme Agréée. Les identifiants OAuth sont à créer dans votre compte SUPER PDP, section Applications.
+
+# Diagnostic
+LemonSuperPDPDiagTitle = Diagnostic
+LemonSuperPDPDiagResults = Résultat du diagnostic
+LemonSuperPDPDiagFacturXEnabled = Module LemonFacturX activé
+LemonSuperPDPDiagFacturXDisabled = Module LemonFacturX requis mais non activé
+LemonSuperPDPDiagCredentialsSet = Identifiants OAuth renseignés
+LemonSuperPDPDiagCredentialsMissing = Identifiants OAuth manquants (client_id et/ou client_secret)
+LemonSuperPDPDiagSellerSIRET = SIRET de votre société
+LemonSuperPDPDiagSellerSIRETMissing = SIRET de votre société absent (Accueil > Setup > Société)
+LemonSuperPDPDiagAllOk = Configuration complète, prête à l'emploi
+
+# Statuts de transmission
+LemonSuperPDPStatusPending = En attente
+LemonSuperPDPStatusSent = Envoyée
+LemonSuperPDPStatusAccepted = Acceptée
+LemonSuperPDPStatusRefused = Refusée
+LemonSuperPDPStatusPaid = Encaissée
+LemonSuperPDPStatusError = Erreur
+
+# Actions
+LemonSuperPDPSendInvoice = Envoyer via SUPER PDP
+LemonSuperPDPSendSelected = Envoyer la sélection via SUPER PDP
+LemonSuperPDPRefreshStatus = Rafraîchir le statut

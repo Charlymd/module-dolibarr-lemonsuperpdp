@@ -1,0 +1,4 @@
+ALTER TABLE llx_lemonsuperpdp_transmission ADD INDEX idx_lemonsuperpdp_transmission_fk_facture (fk_facture);
+ALTER TABLE llx_lemonsuperpdp_transmission ADD INDEX idx_lemonsuperpdp_transmission_superpdp_id (superpdp_id);
+ALTER TABLE llx_lemonsuperpdp_transmission ADD INDEX idx_lemonsuperpdp_transmission_status (status);
+ALTER TABLE llx_lemonsuperpdp_transmission ADD INDEX idx_lemonsuperpdp_transmission_entity (entity);
