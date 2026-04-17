@@ -151,6 +151,21 @@ class ActionsLemonSuperPDP
 			if ($t->status === LemonSuperPDPTransmission::STATUS_ERROR && !empty($t->error_message)) {
 				print '<br><span style="color:#c00;">'.dol_escape_htmltag($t->error_message).'</span>';
 			}
+			// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+			// Lien de réinitialisation visible uniquement en mode sandbox.
+			// En prod réelle, on ne réinitialise pas une transmission : si la
+			// facture a été envoyée par erreur, on émet un avoir Dolibarr.
+			if (getDolGlobalInt('LEMONSUPERPDP_SANDBOX_MODE')) {
+				global $user;
+				if ($user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
+					$resetUrl = $_SERVER['PHP_SELF'].'?action=resettransmissionsuperpdp&id='.((int) $object->id).'&token='.newToken();
+					print '<br><a href="'.dol_escape_htmltag($resetUrl).'" class="opacitymedium" onclick="return confirm(\''.dol_escape_js($langs->trans('LemonSuperPDPResetConfirm')).'\')">';
+					print img_picto('', 'delete', 'class="pictofixedwidth"');
+					print $langs->trans('LemonSuperPDPResetTransmission');
+					print '</a>';
+				}
+			}
+			// >>> FIN SANDBOX MODE <<<
 		} else {
 			print '<span class="opacitymedium">'.$langs->trans('LemonSuperPDPNotTransmitted').'</span>';
 		}
@@ -253,11 +268,40 @@ class ActionsLemonSuperPDP
 	}
 
 	/**
-	 * Intercepte l'action dosendsuperpdp : lit le PDF, envoie via l'API, stocke la transmission.
+	 * Intercepte les actions du module : dosendsuperpdp (envoi) et
+	 * resettransmissionsuperpdp (reset sandbox).
 	 */
 	public function doActions($parameters, &$object, &$action, $hookmanager)
 	{
 		global $langs, $user, $conf;
+
+		// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+		if ($action === 'resettransmissionsuperpdp') {
+			if (!isModEnabled('lemonsuperpdp')) return 0;
+			if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
+			$langs->load("lemonsuperpdp@lemonsuperpdp");
+			if (GETPOST('token', 'alpha') != newToken()) {
+				setEventMessages('Bad CSRF token', null, 'errors');
+				$action = '';
+				return 0;
+			}
+			if (!$user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
+				setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
+				$action = '';
+				return 0;
+			}
+			dol_include_once('/lemonsuperpdp/class/transmission.class.php');
+			$t = new LemonSuperPDPTransmission($this->db);
+			$nb = $t->deleteAllForFacture($object->id);
+			if ($nb < 0) {
+				setEventMessages($langs->trans('LemonSuperPDPResetError'), null, 'errors');
+			} else {
+				setEventMessages($langs->trans('LemonSuperPDPResetDone', (int) $nb), null, 'mesgs');
+			}
+			$action = '';
+			return 0;
+		}
+		// >>> FIN SANDBOX MODE <<<
 
 		if ($action !== 'dosendsuperpdp') return 0;
 		if (!isModEnabled('lemonsuperpdp')) return 0;

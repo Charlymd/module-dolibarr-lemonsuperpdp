@@ -65,4 +65,8 @@ LemonSuperPDPSandboxModeHelp = If enabled, the invoice issuer SIREN will be repl
 LemonSuperPDPSandboxModeActiveWarning = WARNING: the issuer SIREN will be replaced with %s on every send. Never enable in production.
 LemonSuperPDPSandboxModeIdProf6Missing = Sandbox mode enabled but the company idprof6 field is empty. Set the replacement SIREN under Home > Setup > Company.
 LemonSuperPDPSandboxModeSent = sandbox mode, SIREN replaced
+LemonSuperPDPResetTransmission = Reset transmission
+LemonSuperPDPResetConfirm = Delete the transmission history for this invoice? This allows re-testing.
+LemonSuperPDPResetDone = Transmission reset (%s row(s) deleted)
+LemonSuperPDPResetError = Could not reset transmission
 # >>> END SANDBOX MODE <<<

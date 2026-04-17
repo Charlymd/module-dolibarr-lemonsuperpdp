@@ -73,4 +73,8 @@ LemonSuperPDPSandboxModeHelp = Si activé, le SIREN émetteur de la facture sera
 LemonSuperPDPSandboxModeActiveWarning = ATTENTION : le SIREN émetteur sera remplacé par %s avant chaque envoi. Ne jamais activer en production.
 LemonSuperPDPSandboxModeIdProf6Missing = Mode sandbox activé mais le champ idprof6 de la société est vide. Renseignez-y le SIREN de substitution dans Accueil > Setup > Société.
 LemonSuperPDPSandboxModeSent = mode sandbox, SIREN remplacé
+LemonSuperPDPResetTransmission = Réinitialiser la transmission
+LemonSuperPDPResetConfirm = Supprimer l'historique de transmission pour cette facture ? Cela permet de la retester.
+LemonSuperPDPResetDone = Transmission réinitialisée (%s ligne(s) supprimée(s))
+LemonSuperPDPResetError = Impossible de réinitialiser la transmission
 # >>> FIN SANDBOX MODE <<<

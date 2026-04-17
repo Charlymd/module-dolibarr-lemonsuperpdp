@@ -185,6 +185,26 @@ class LemonSuperPDPTransmission extends CommonObject
 	}
 
 	/**
+	 * Supprime toutes les transmissions d'une facture donnée (utile pour
+	 * réinitialiser l'état en phase de test sandbox).
+	 */
+	public function deleteAllForFacture($fkFacture)
+	{
+		global $conf;
+		$sql = "DELETE FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
+		$sql .= " WHERE fk_facture = ".((int) $fkFacture);
+		$sql .= " AND entity = ".((int) $conf->entity);
+
+		dol_syslog(get_class($this)."::deleteAllForFacture fk_facture=".((int) $fkFacture), LOG_DEBUG);
+		$resql = $this->db->query($sql);
+		if ($resql) {
+			return $this->db->affected_rows($resql);
+		}
+		$this->error = $this->db->lasterror();
+		return -1;
+	}
+
+	/**
 	 * Retourne le code de badge Dolibarr associé au statut courant (status0..status8).
 	 */
 	public function getBadgeClass()
