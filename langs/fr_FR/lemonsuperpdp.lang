@@ -66,6 +66,24 @@ LemonSuperPDPTransmissionLabel = Transmission SUPER PDP
 LemonSuperPDPNotTransmitted = Non transmise
 LemonSuperPDPSentOn = Envoyée le
 
+# Historique des événements
+LemonSuperPDPEventsHistory = Historique des événements
+LemonSuperPDPEventMessage = Message
+LemonSuperPDPEventCode = Code
+LemonSuperPDPEventDirection = Sens
+LemonSuperPDPEventDirectionIn = Reçu
+LemonSuperPDPEventDirectionOut = Émis
+
+# Actions events
+LemonSuperPDPRefreshDone = %s nouvel(s) événement(s) récupéré(s) depuis SUPER PDP
+LemonSuperPDPRefreshError = Impossible de rafraîchir les événements
+LemonSuperPDPSendStatusPrompt = Choisir un statut à envoyer…
+LemonSuperPDPSendStatusButton = Envoyer le statut
+LemonSuperPDPSendStatusConfirm = Confirmer l'envoi du statut
+LemonSuperPDPStatusSent = Statut envoyé avec succès
+LemonSuperPDPStatusSendError = Échec de l'envoi du statut
+LemonSuperPDPStatusInvalid = Code de statut invalide
+
 # >>> SANDBOX MODE - À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 # Voir en-tête class/actions_lemonsuperpdp.class.php
 LemonSuperPDPSandboxMode = Mode sandbox (phase pilote)

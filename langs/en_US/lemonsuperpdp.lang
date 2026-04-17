@@ -59,6 +59,21 @@ LemonSuperPDPTransmissionLabel = SUPER PDP transmission
 LemonSuperPDPNotTransmitted = Not transmitted
 LemonSuperPDPSentOn = Sent on
 
+LemonSuperPDPEventsHistory = Event history
+LemonSuperPDPEventMessage = Message
+LemonSuperPDPEventCode = Code
+LemonSuperPDPEventDirection = Direction
+LemonSuperPDPEventDirectionIn = In
+LemonSuperPDPEventDirectionOut = Out
+LemonSuperPDPRefreshDone = %s new event(s) fetched from SUPER PDP
+LemonSuperPDPRefreshError = Could not refresh events
+LemonSuperPDPSendStatusPrompt = Select a status to send...
+LemonSuperPDPSendStatusButton = Send status
+LemonSuperPDPSendStatusConfirm = Confirm sending status
+LemonSuperPDPStatusSent = Status sent successfully
+LemonSuperPDPStatusSendError = Failed to send status
+LemonSuperPDPStatusInvalid = Invalid status code
+
 # >>> SANDBOX MODE - TO BE REMOVED AFTER PILOT PHASE <<<
 LemonSuperPDPSandboxMode = Sandbox mode (pilot phase)
 LemonSuperPDPSandboxModeHelp = If enabled, the invoice issuer SIREN will be replaced with the value of the <a href="%s/admin/company.php" target="_blank" rel="noopener">Professional identifier 6</a> field before sending. The sending format will be forced to CII. Disable as soon as your real SIREN is validated on SUPER PDP.

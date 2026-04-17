@@ -151,6 +151,67 @@ class ActionsLemonSuperPDP
 			if ($t->status === LemonSuperPDPTransmission::STATUS_ERROR && !empty($t->error_message)) {
 				print '<br><span style="color:#c00;">'.dol_escape_htmltag($t->error_message).'</span>';
 			}
+
+			// Historique des événements de cycle de vie.
+			dol_include_once('/lemonsuperpdp/class/event.class.php');
+			$evObj = new LemonSuperPDPEvent($this->db);
+			$events = $evObj->listByFacture($object->id);
+			if (is_array($events) && count($events) > 0) {
+				print '<br><br><strong>'.$langs->trans('LemonSuperPDPEventsHistory').'</strong>';
+				print '<table class="noborder centpercent" style="margin-top:4px;">';
+				print '<tr class="liste_titre">';
+				print '<td>'.$langs->trans('Date').'</td>';
+				print '<td>'.$langs->trans('LemonSuperPDPEventMessage').'</td>';
+				print '<td class="center">'.$langs->trans('LemonSuperPDPEventCode').'</td>';
+				print '<td class="center">'.$langs->trans('LemonSuperPDPEventDirection').'</td>';
+				print '</tr>';
+				foreach ($events as $ev) {
+					$label = !empty($ev->message) ? $ev->message : LemonSuperPDPEvent::getStatusLabel($ev->status_code);
+					$badge = LemonSuperPDPEvent::getBadgeClass($ev->status_code);
+					$dirLabel = ($ev->direction === LemonSuperPDPEvent::DIRECTION_OUT)
+						? $langs->trans('LemonSuperPDPEventDirectionOut')
+						: $langs->trans('LemonSuperPDPEventDirectionIn');
+					print '<tr class="oddeven">';
+					print '<td class="nowrap">'.dol_print_date($ev->event_date, 'dayhour').'</td>';
+					print '<td>'.dol_escape_htmltag($label).'</td>';
+					print '<td class="center"><span class="badge '.$badge.'">'.dol_escape_htmltag($ev->status_code).'</span></td>';
+					print '<td class="center opacitymedium">'.dol_escape_htmltag($dirLabel).'</td>';
+					print '</tr>';
+				}
+				print '</table>';
+			}
+
+			// Bouton de rafraîchissement + dropdown "Envoyer un statut".
+			global $user;
+			if ($user->hasRight('lemonsuperpdp', 'transmission', 'ecrire') && !empty($t->superpdp_id)) {
+				$refreshUrl = $_SERVER['PHP_SELF'].'?action=refreshsuperpdpevents&id='.((int) $object->id).'&token='.newToken();
+				print '<br><a href="'.dol_escape_htmltag($refreshUrl).'" class="button buttonSmall">';
+				print img_picto('', 'refresh', 'class="pictofixedwidth"');
+				print $langs->trans('LemonSuperPDPRefreshStatus');
+				print '</a>';
+
+				$emittable = LemonSuperPDPEvent::getEmittableStatuses();
+				print ' <select id="lemonsuperpdp_status_select" class="flat" style="margin-left:8px;">';
+				print '<option value="">'.$langs->trans('LemonSuperPDPSendStatusPrompt').'</option>';
+				foreach ($emittable as $code) {
+					print '<option value="'.$code.'">'.$code.' — '.dol_escape_htmltag(LemonSuperPDPEvent::getStatusLabel($code)).'</option>';
+				}
+				print '</select>';
+				print ' <a href="#" id="lemonsuperpdp_send_status" class="button buttonSmall">'.$langs->trans('LemonSuperPDPSendStatusButton').'</a>';
+				$confirmTxt = dol_escape_js($langs->trans('LemonSuperPDPSendStatusConfirm'));
+				$selectTxt = dol_escape_js($langs->trans('LemonSuperPDPSendStatusPrompt'));
+				$baseUrl = $_SERVER['PHP_SELF'].'?action=sendstatussuperpdp&id='.((int) $object->id).'&token='.newToken().'&status_code=';
+				print '<script>
+document.getElementById("lemonsuperpdp_send_status").addEventListener("click", function(e){
+  e.preventDefault();
+  var sel = document.getElementById("lemonsuperpdp_status_select");
+  var code = sel.value;
+  if (!code) { alert("'.$selectTxt.'"); return; }
+  if (!confirm("'.$confirmTxt.' " + code)) return;
+  window.location.href = "'.dol_escape_js($baseUrl).'" + encodeURIComponent(code);
+});
+</script>';
+			}
 			// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 			// Lien de réinitialisation visible uniquement en mode sandbox.
 			// En prod réelle, on ne réinitialise pas une transmission : si la
@@ -274,6 +335,65 @@ class ActionsLemonSuperPDP
 	public function doActions($parameters, &$object, &$action, $hookmanager)
 	{
 		global $langs, $user, $conf;
+
+		// Action : rafraîchir les events SUPER PDP pour la facture courante.
+		if ($action === 'refreshsuperpdpevents') {
+			if (!isModEnabled('lemonsuperpdp')) return 0;
+			if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
+			$langs->load("lemonsuperpdp@lemonsuperpdp");
+			if (GETPOST('token', 'alpha') != newToken()) {
+				setEventMessages('Bad CSRF token', null, 'errors');
+				$action = '';
+				return 0;
+			}
+			if (!$user->hasRight('lemonsuperpdp', 'transmission', 'lire')) {
+				setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
+				$action = '';
+				return 0;
+			}
+			try {
+				$nb = $this->refreshEventsForFacture($object, $user);
+				setEventMessages($langs->trans('LemonSuperPDPRefreshDone', (int) $nb), null, 'mesgs');
+			} catch (Exception $e) {
+				dol_syslog('LemonSuperPDP refresh events: '.$e->getMessage(), LOG_ERR);
+				setEventMessages($langs->trans('LemonSuperPDPRefreshError').' — '.$e->getMessage(), null, 'errors');
+			}
+			$action = '';
+			return 0;
+		}
+
+		// Action : envoyer un statut de cycle de vie (fr:204..fr:212).
+		if ($action === 'sendstatussuperpdp') {
+			if (!isModEnabled('lemonsuperpdp')) return 0;
+			if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
+			$langs->load("lemonsuperpdp@lemonsuperpdp");
+			if (GETPOST('token', 'alpha') != newToken()) {
+				setEventMessages('Bad CSRF token', null, 'errors');
+				$action = '';
+				return 0;
+			}
+			if (!$user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
+				setEventMessages($langs->trans('NotEnoughPermissions'), null, 'errors');
+				$action = '';
+				return 0;
+			}
+			$statusCode = GETPOST('status_code', 'alphanohtml');
+			dol_include_once('/lemonsuperpdp/class/event.class.php');
+			if (!in_array($statusCode, LemonSuperPDPEvent::getEmittableStatuses(), true)) {
+				setEventMessages($langs->trans('LemonSuperPDPStatusInvalid').' : '.dol_escape_htmltag($statusCode), null, 'errors');
+				$action = '';
+				return 0;
+			}
+			try {
+				$this->sendManualStatus($object, $user, $statusCode);
+				setEventMessages($langs->trans('LemonSuperPDPStatusSent').' : '.$statusCode, null, 'mesgs');
+			} catch (Exception $e) {
+				dol_syslog('LemonSuperPDP send status: '.$e->getMessage(), LOG_ERR);
+				setEventMessages($langs->trans('LemonSuperPDPStatusSendError').' — '.$e->getMessage(), null, 'errors');
+			}
+			$action = '';
+			return 0;
+		}
 
 		// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 		if ($action === 'resettransmissionsuperpdp') {
@@ -507,5 +627,150 @@ class ActionsLemonSuperPDP
 
 		$action = '';
 		return 0;
+	}
+
+	/**
+	 * Récupère les events SUPER PDP pour une facture donnée et les insère
+	 * en base s'ils n'existent pas déjà. Appelé par le bouton "Rafraîchir"
+	 * sur la fiche facture et par le cron de synchronisation.
+	 *
+	 * @return int Nombre d'events nouvellement insérés
+	 */
+	public function refreshEventsForFacture($facture, $user)
+	{
+		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
+		dol_include_once('/lemonsuperpdp/class/event.class.php');
+		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+
+		$t = new LemonSuperPDPTransmission($this->db);
+		if ($t->fetchLastByFacture($facture->id) <= 0 || empty($t->superpdp_id)) {
+			return 0;
+		}
+
+		$client = new SuperPDPClient($this->db);
+		$data = $client->getInvoice((int) $t->superpdp_id);
+
+		$nbInserted = 0;
+		$evObj = new LemonSuperPDPEvent($this->db);
+
+		// L'objet facture SUPER PDP contient un champ invoice_events étendu
+		// depuis l'API v1.9.0. Fallback : liste globale filtrée.
+		$events = array();
+		if (!empty($data['invoice_events']) && is_array($data['invoice_events'])) {
+			$events = $data['invoice_events'];
+		}
+
+		foreach ($events as $ev) {
+			if (empty($ev['id']) || empty($ev['status_code'])) continue;
+			if ($evObj->existsBySuperpdpId((int) $ev['id'])) continue;
+
+			$newEv = new LemonSuperPDPEvent($this->db);
+			$newEv->fk_transmission = $t->id;
+			$newEv->superpdp_event_id = (int) $ev['id'];
+			$newEv->status_code = (string) $ev['status_code'];
+			$newEv->message = !empty($ev['message']) ? (string) $ev['message'] : null;
+			$newEv->direction = LemonSuperPDPEvent::DIRECTION_IN;
+			$newEv->event_date = !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now();
+			$newEv->payload_raw = json_encode($ev);
+			if ($newEv->create($user) > 0) {
+				$nbInserted++;
+			}
+		}
+
+		// Met à jour le statut de la transmission selon le dernier event connu.
+		if ($nbInserted > 0 || !empty($events)) {
+			$lastCode = '';
+			$lastTs = 0;
+			foreach ($events as $ev) {
+				$ts = !empty($ev['created_at']) ? strtotime($ev['created_at']) : 0;
+				if ($ts >= $lastTs) {
+					$lastTs = $ts;
+					$lastCode = $ev['status_code'];
+				}
+			}
+			if (!empty($lastCode)) {
+				$map = array(
+					'fr:200' => LemonSuperPDPTransmission::STATUS_SENT,
+					'fr:202' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
+					'fr:204' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
+					'fr:206' => LemonSuperPDPTransmission::STATUS_ACCEPTED,
+					'fr:212' => LemonSuperPDPTransmission::STATUS_PAID,
+					'fr:201' => LemonSuperPDPTransmission::STATUS_REFUSED,
+					'fr:203' => LemonSuperPDPTransmission::STATUS_REFUSED,
+					'fr:210' => LemonSuperPDPTransmission::STATUS_REFUSED,
+				);
+				if (isset($map[$lastCode])) {
+					$t->status = $map[$lastCode];
+				}
+				$t->status_raw = $lastCode;
+				$t->update($user);
+			}
+		}
+
+		return $nbInserted;
+	}
+
+	/**
+	 * Envoie un statut de cycle de vie manuellement. Pour fr:212 et fr:207,
+	 * construit automatiquement les montants ventilés par taux TVA à partir
+	 * des lignes de la facture.
+	 */
+	public function sendManualStatus($facture, $user, $statusCode)
+	{
+		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
+		dol_include_once('/lemonsuperpdp/class/event.class.php');
+		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+
+		$t = new LemonSuperPDPTransmission($this->db);
+		if ($t->fetchLastByFacture($facture->id) <= 0 || empty($t->superpdp_id)) {
+			throw new Exception('Aucune transmission avec ID SUPER PDP pour cette facture');
+		}
+
+		$details = array();
+		if ($statusCode === 'fr:212' || $statusCode === 'fr:207') {
+			if (empty($facture->lines)) {
+				$facture->fetch_lines();
+			}
+			$amountsByRate = array();
+			foreach ($facture->lines as $line) {
+				$rate = (float) $line->tva_tx;
+				$key = number_format($rate, 1, '.', '');
+				if (!isset($amountsByRate[$key])) {
+					$amountsByRate[$key] = 0.0;
+				}
+				$amountsByRate[$key] += (float) $line->total_ht;
+			}
+			$today = date('Y-m-d');
+			$amounts = array();
+			foreach ($amountsByRate as $rate => $netAmount) {
+				$amounts[] = array(
+					'net_amount' => number_format($netAmount, 2, '.', ''),
+					'currency_code' => 'EUR',
+					'type_code' => 'MEN',
+					'vat_rate' => $rate,
+					'date' => $today,
+				);
+			}
+			$details = array(array('amounts' => $amounts));
+		}
+
+		$client = new SuperPDPClient($this->db);
+		$response = $client->submitEvent((int) $t->superpdp_id, $statusCode, $details);
+
+		$ev = new LemonSuperPDPEvent($this->db);
+		$ev->fk_transmission = $t->id;
+		$ev->superpdp_event_id = !empty($response['id']) ? (int) $response['id'] : null;
+		$ev->status_code = $statusCode;
+		$ev->message = LemonSuperPDPEvent::getStatusLabel($statusCode);
+		$ev->direction = LemonSuperPDPEvent::DIRECTION_OUT;
+		$ev->event_date = dol_now();
+		$ev->payload_raw = json_encode($response);
+		$ev->create($user);
+
+		if ($statusCode === 'fr:212') {
+			$t->status = LemonSuperPDPTransmission::STATUS_PAID;
+		}
+		$t->status_raw = $statusCode;
+		$t->update($user);
 	}
 }

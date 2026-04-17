@@ -200,6 +200,27 @@ class SuperPDPClient
 	}
 
 	/**
+	 * Envoie un invoice_event pour une facture donnée (statut cycle de vie).
+	 *
+	 * @param int    $superpdpInvoiceId  ID SUPER PDP de la facture (stocké en transmission)
+	 * @param string $statusCode         Code AFNOR fr:204..fr:212
+	 * @param array  $details            Détails (ex: amounts par taux TVA pour fr:212)
+	 * @return array Réponse JSON décodée (contient l'id du nouvel event)
+	 * @throws SuperPDPException
+	 */
+	public function submitEvent($superpdpInvoiceId, $statusCode, $details = array())
+	{
+		$body = array(
+			'invoice_id' => (int) $superpdpInvoiceId,
+			'status_code' => (string) $statusCode,
+		);
+		if (!empty($details)) {
+			$body['details'] = $details;
+		}
+		return $this->request('POST', '/v1.beta/invoice_events', json_encode($body), 'application/json');
+	}
+
+	/**
 	 * Appel HTTP générique avec authentification Bearer.
 	 *
 	 * @param string $method      GET, POST, ...

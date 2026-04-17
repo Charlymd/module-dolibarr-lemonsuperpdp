@@ -34,7 +34,7 @@ class modLemonSuperPDP extends DolibarrModules
 		$this->editor_url = 'https://hellolemon.fr';
 
 		$this->module_parts = array(
-			'triggers' => 0,
+			'triggers' => 1,
 			'login' => 0,
 			'substitutions' => 0,
 			'menus' => 0,
@@ -62,6 +62,7 @@ class modLemonSuperPDP extends DolibarrModules
 
 		$this->tables = array(
 			'llx_lemonsuperpdp_transmission',
+			'llx_lemonsuperpdp_event',
 		);
 
 		$this->const = array(
