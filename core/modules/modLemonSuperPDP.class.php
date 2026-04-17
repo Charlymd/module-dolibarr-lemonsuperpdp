@@ -72,6 +72,10 @@ class modLemonSuperPDP extends DolibarrModules
 			array('LEMONSUPERPDP_FORMAT', 'chaine', 'facturx', 'Format d\'envoi par défaut (facturx, ubl, cii)', 1, 'current', 0),
 			array('LEMONSUPERPDP_ACCESS_TOKEN', 'chaine', '', 'Cache du token OAuth 2.1 (JSON)', 1, 'current', 0),
 			array('LEMONSUPERPDP_LAST_EVENT_ID', 'chaine', '0', 'Dernier invoice_event synchronisé', 1, 'current', 0),
+			// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+			// Voir en-tête de class/actions_lemonsuperpdp.class.php pour le contexte.
+			array('LEMONSUPERPDP_SANDBOX_MODE', 'int', '0', 'Mode sandbox : remplace le SIREN émetteur par celui du champ idprof6 avant envoi', 1, 'current', 0),
+			// >>> FIN SANDBOX MODE <<<
 		);
 
 		if (!isset($conf->lemonsuperpdp) || !isset($conf->lemonsuperpdp->enabled)) {

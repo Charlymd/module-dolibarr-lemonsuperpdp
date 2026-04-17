@@ -64,3 +64,12 @@ LemonSuperPDPCreateError = Impossible d'enregistrer la transmission en base
 LemonSuperPDPTransmissionLabel = Transmission SUPER PDP
 LemonSuperPDPNotTransmitted = Non transmise
 LemonSuperPDPSentOn = Envoyée le
+
+# >>> SANDBOX MODE - À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+# Voir en-tête class/actions_lemonsuperpdp.class.php
+LemonSuperPDPSandboxMode = Mode sandbox (phase pilote)
+LemonSuperPDPSandboxModeHelp = Si activé, le SIREN émetteur de la facture sera remplacé par la valeur du champ <a href="%s/admin/company.php" target="_blank" rel="noopener">Identifiant professionnel 6</a> de votre société avant envoi. Le format d'envoi sera forcé en CII. À désactiver dès que votre SIREN réel est validé côté SUPER PDP.
+LemonSuperPDPSandboxModeActiveWarning = ATTENTION : le SIREN émetteur sera remplacé par %s avant chaque envoi. Ne jamais activer en production.
+LemonSuperPDPSandboxModeIdProf6Missing = Mode sandbox activé mais le champ idprof6 de la société est vide. Renseignez-y le SIREN de substitution dans Accueil > Setup > Société.
+LemonSuperPDPSandboxModeSent = mode sandbox, SIREN remplacé
+# >>> FIN SANDBOX MODE <<<

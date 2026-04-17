@@ -46,6 +46,9 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	$clientId = trim(GETPOST('LEMONSUPERPDP_CLIENT_ID', 'alphanohtml'));
 	$clientSecret = trim(GETPOST('LEMONSUPERPDP_CLIENT_SECRET', 'alphanohtml'));
 	$format = GETPOST('LEMONSUPERPDP_FORMAT', 'alpha');
+	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+	$sandboxMode = GETPOSTINT('LEMONSUPERPDP_SANDBOX_MODE');
+	// >>> FIN SANDBOX MODE <<<
 
 	if (!in_array($format, array('facturx', 'ubl', 'cii'), true)) {
 		$format = 'facturx';
@@ -72,6 +75,11 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	if (dolibarr_set_const($db, 'LEMONSUPERPDP_FORMAT', $format, 'chaine', 0, '', $conf->entity) < 0) {
 		$error++;
 	}
+	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+	if (dolibarr_set_const($db, 'LEMONSUPERPDP_SANDBOX_MODE', $sandboxMode, 'int', 0, '', $conf->entity) < 0) {
+		$error++;
+	}
+	// >>> FIN SANDBOX MODE <<<
 
 	// Toute modification invalide le token en cache
 	dolibarr_set_const($db, 'LEMONSUPERPDP_ACCESS_TOKEN', '', 'chaine', 0, '', $conf->entity);
@@ -182,6 +190,30 @@ print '</select>';
 print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPFormatHelp", DOL_URL_ROOT).'</span>';
 print '</td>';
 print '</tr>';
+
+// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+// Ce bloc de configuration n'a de sens que pendant la phase pilote SUPER PDP.
+// Voir l'en-tête de class/actions_lemonsuperpdp.class.php pour le contexte.
+print '<tr class="oddeven">';
+print '<td>'.$langs->trans("LemonSuperPDPSandboxMode").'</td>';
+print '<td>';
+$sandboxCurrent = getDolGlobalInt('LEMONSUPERPDP_SANDBOX_MODE');
+print '<select name="LEMONSUPERPDP_SANDBOX_MODE" class="flat">';
+print '<option value="0"'.(!$sandboxCurrent ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '<option value="1"'.($sandboxCurrent ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
+print '</select>';
+print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPSandboxModeHelp").'</span>';
+if ($sandboxCurrent) {
+	$idprof6 = !empty($mysoc->idprof6) ? $mysoc->idprof6 : '';
+	if (empty($idprof6)) {
+		print '<br><span style="color:#c00;"><strong>'.$langs->trans("LemonSuperPDPSandboxModeIdProf6Missing").'</strong></span>';
+	} else {
+		print '<br><span style="color:#c70;">'.$langs->trans("LemonSuperPDPSandboxModeActiveWarning", dol_escape_htmltag($idprof6)).'</span>';
+	}
+}
+print '</td>';
+print '</tr>';
+// >>> FIN SANDBOX MODE <<<
 
 print '</table>';
 

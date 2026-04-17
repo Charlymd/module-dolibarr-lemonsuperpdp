@@ -8,6 +8,43 @@
  * (at your option) any later version.
  *
  * Hooks LemonSuperPDP : bouton d'envoi sur la fiche facture, gestion action.
+ *
+ * =============================================================================
+ * ATTENTION — CODE SANDBOX TEMPORAIRE
+ * =============================================================================
+ *
+ * Ce fichier contient des blocs de code dédiés au mode sandbox SUPER PDP.
+ * Ils sont marqués par les balises suivantes :
+ *
+ *     // >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+ *     ...
+ *     // >>> FIN SANDBOX MODE <<<
+ *
+ * Contexte : pendant la phase pilote SUPER PDP (mars-août 2026), Lemon n'a
+ * pas encore accès à son SIREN réel côté SUPER PDP. Pour tester l'intégration
+ * de bout en bout, on utilise les entreprises fictives du sandbox (Burger
+ * Queen SIREN 000000002). Comme Dolibarr n'émet qu'au nom de $mysoc (SIREN
+ * Lemon 802711796), l'API SUPER PDP rejette ("SIREN émetteur ne correspond
+ * pas à l'entreprise du token").
+ *
+ * Contournement : quand la constante LEMONSUPERPDP_SANDBOX_MODE = 1,
+ * on extrait le XML Factur-X du PDF, on remplace le SIREN émetteur par
+ * la valeur du champ Dolibarr "Identifiant professionnel 6" (idprof6, ici
+ * hijacké pour y stocker le SIREN sandbox 000000002), puis on envoie
+ * le XML modifié en format CII.
+ *
+ * À SUPPRIMER quand Lemon a accès à son SIREN réel sur SUPER PDP :
+ *   1. Retirer la constante LEMONSUPERPDP_SANDBOX_MODE du descripteur
+ *      module (core/modules/modLemonSuperPDP.class.php)
+ *   2. Retirer le bloc correspondant dans admin/setup.php (UI + sauvegarde)
+ *   3. Retirer le bloc entre // >>> SANDBOX MODE <<< dans ce fichier
+ *   4. Supprimer les clés de traduction LemonSuperPDPSandboxMode* dans
+ *      langs/{fr_FR,en_US}/lemonsuperpdp.lang
+ *   5. Vider la constante côté Dolibarr en prod : dolibarr_del_const
+ *   6. Vider le champ idprof6 de la société si utilisé uniquement pour ça
+ *
+ * Un grep global sur "SANDBOX MODE" donne tous les points à nettoyer.
+ * =============================================================================
  */
 
 class ActionsLemonSuperPDP
@@ -170,6 +207,8 @@ class ActionsLemonSuperPDP
 		}
 
 		$format = getDolGlobalString('LEMONSUPERPDP_FORMAT', 'facturx');
+		$formatSent = $format;
+		$fileToSend = $pdfPath;
 
 		// Créer la ligne transmission en pending
 		$t->fk_facture = $object->id;
@@ -183,10 +222,70 @@ class ActionsLemonSuperPDP
 			return 0;
 		}
 
+		// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+		// Contournement phase pilote : le SIREN émetteur réel ($mysoc->idprof2)
+		// ne correspond pas à l'entreprise du token OAuth (cf. en-tête fichier).
+		// On extrait le XML du PDF Factur-X, on remplace le SIREN, on envoie en CII.
+		// Tout le bloc ci-dessous est à supprimer quand Lemon aura son SIREN
+		// réel validé côté SUPER PDP.
+		$sandboxMode = (bool) getDolGlobalInt('LEMONSUPERPDP_SANDBOX_MODE');
+		$tmpXmlPath = null;
+		if ($sandboxMode) {
+			global $mysoc;
+			$fakeSiren = !empty($mysoc->idprof6) ? preg_replace('/[^0-9]/', '', $mysoc->idprof6) : '';
+			$realSiren = !empty($mysoc->idprof2) ? substr(preg_replace('/[^0-9]/', '', $mysoc->idprof2), 0, 9) : '';
+			if (empty($fakeSiren)) {
+				$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
+				$t->error_message = $langs->trans('LemonSuperPDPSandboxModeIdProf6Missing');
+				$t->update($user);
+				setEventMessages($t->error_message, null, 'errors');
+				$action = '';
+				return 0;
+			}
+			try {
+				// On réutilise la lib atgp/factur-x déjà embarquée dans LemonFacturX
+				// (pas de dépendance composer dans LemonSuperPDP).
+				$facturxVendor = DOL_DOCUMENT_ROOT.'/custom/lemonfacturx/vendor/autoload.php';
+				if (!file_exists($facturxVendor)) {
+					throw new Exception('Autoload LemonFacturX introuvable : '.$facturxVendor);
+				}
+				require_once $facturxVendor;
+				$reader = new \Atgp\FacturX\Reader();
+				$pdfBinary = file_get_contents($pdfPath);
+				$xml = $reader->extractXML($pdfBinary, false);
+
+				// Substitution ciblée : on ne remplace que les occurrences exactes
+				// du SIREN entre balises ou en valeur d'attribut. Le pattern
+				// "> 9 chiffres <" ne matche pas le SIRET (14 chiffres), donc
+				// le SIRET et le numéro TVA intracommunautaire restent intacts.
+				$patched = str_replace(
+					array('>'.$realSiren.'<', '"'.$realSiren.'"'),
+					array('>'.$fakeSiren.'<', '"'.$fakeSiren.'"'),
+					$xml
+				);
+
+				$tmpXmlPath = tempnam(sys_get_temp_dir(), 'lemonspd_').'.xml';
+				file_put_contents($tmpXmlPath, $patched);
+				$fileToSend = $tmpXmlPath;
+				$formatSent = 'cii';
+				$t->format_sent = 'cii-sandbox';
+				dol_syslog('LemonSuperPDP [SANDBOX]: SIREN '.$realSiren.' -> '.$fakeSiren.', envoi en CII', LOG_WARNING);
+			} catch (Exception $e) {
+				dol_syslog('LemonSuperPDP [SANDBOX]: échec extraction/patch XML : '.$e->getMessage(), LOG_ERR);
+				$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
+				$t->error_message = 'Mode sandbox : '.$e->getMessage();
+				$t->update($user);
+				setEventMessages($t->error_message, null, 'errors');
+				$action = '';
+				return 0;
+			}
+		}
+		// >>> FIN SANDBOX MODE <<<
+
 		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
 		try {
 			$client = new SuperPDPClient($this->db);
-			$response = $client->submitInvoice($pdfPath, $format);
+			$response = $client->submitInvoice($fileToSend, $formatSent);
 
 			$t->superpdp_id = !empty($response['id']) ? (int) $response['id'] : null;
 			$t->status = LemonSuperPDPTransmission::STATUS_SENT;
@@ -197,6 +296,11 @@ class ActionsLemonSuperPDP
 			if (!empty($t->superpdp_id)) {
 				$msg .= ' — ID SUPER PDP : '.((int) $t->superpdp_id);
 			}
+			// >>> SANDBOX MODE <<<
+			if ($sandboxMode) {
+				$msg .= ' ('.$langs->trans('LemonSuperPDPSandboxModeSent').')';
+			}
+			// >>> FIN SANDBOX MODE <<<
 			setEventMessages($msg, null, 'mesgs');
 		} catch (SuperPDPException $e) {
 			dol_syslog('LemonSuperPDP: échec envoi facture '.$object->ref.' : '.$e->getMessage(), LOG_ERR);
@@ -214,6 +318,12 @@ class ActionsLemonSuperPDP
 			$t->update($user);
 			setEventMessages($langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(), null, 'errors');
 		}
+
+		// >>> SANDBOX MODE <<<
+		if ($tmpXmlPath !== null && file_exists($tmpXmlPath)) {
+			@unlink($tmpXmlPath);
+		}
+		// >>> FIN SANDBOX MODE <<<
 
 		$action = '';
 		return 0;
