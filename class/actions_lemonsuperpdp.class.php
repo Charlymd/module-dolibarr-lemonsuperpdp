@@ -181,26 +181,30 @@ class ActionsLemonSuperPDP
 				print '</table>';
 			}
 
-			// Bouton de rafraîchissement + dropdown "Envoyer un statut".
+			// Actions : rafraîchir + envoyer un statut, en liens inline discrets.
 			global $user;
 			if ($user->hasRight('lemonsuperpdp', 'transmission', 'ecrire') && !empty($t->superpdp_id)) {
 				$refreshUrl = $_SERVER['PHP_SELF'].'?action=refreshsuperpdpevents&id='.((int) $object->id).'&token='.newToken();
-				print '<br><a href="'.dol_escape_htmltag($refreshUrl).'" class="button buttonSmall">';
-				print img_picto('', 'refresh', 'class="pictofixedwidth"');
-				print $langs->trans('LemonSuperPDPRefreshStatus');
-				print '</a>';
-
 				$emittable = LemonSuperPDPEvent::getEmittableStatuses();
-				print ' <select id="lemonsuperpdp_status_select" class="flat" style="margin-left:8px;">';
+				$confirmTxt = dol_escape_js($langs->trans('LemonSuperPDPSendStatusConfirm'));
+				$selectTxt = dol_escape_js($langs->trans('LemonSuperPDPSendStatusPrompt'));
+				$baseUrl = $_SERVER['PHP_SELF'].'?action=sendstatussuperpdp&id='.((int) $object->id).'&token='.newToken().'&status_code=';
+
+				print '<div class="inline-block valignmiddle" style="margin-top:6px;">';
+				print '<a href="'.dol_escape_htmltag($refreshUrl).'" class="valignmiddle" title="'.dol_escape_htmltag($langs->trans('LemonSuperPDPRefreshStatus')).'">';
+				print img_picto($langs->trans('LemonSuperPDPRefreshStatus'), 'refresh', 'class="paddingright"');
+				print '</a>';
+				print '<select id="lemonsuperpdp_status_select" class="flat minwidth150 marginleftonly valignmiddle">';
 				print '<option value="">'.$langs->trans('LemonSuperPDPSendStatusPrompt').'</option>';
 				foreach ($emittable as $code) {
 					print '<option value="'.$code.'">'.$code.' — '.dol_escape_htmltag(LemonSuperPDPEvent::getStatusLabel($code)).'</option>';
 				}
 				print '</select>';
-				print ' <a href="#" id="lemonsuperpdp_send_status" class="button buttonSmall">'.$langs->trans('LemonSuperPDPSendStatusButton').'</a>';
-				$confirmTxt = dol_escape_js($langs->trans('LemonSuperPDPSendStatusConfirm'));
-				$selectTxt = dol_escape_js($langs->trans('LemonSuperPDPSendStatusPrompt'));
-				$baseUrl = $_SERVER['PHP_SELF'].'?action=sendstatussuperpdp&id='.((int) $object->id).'&token='.newToken().'&status_code=';
+				print ' <a href="#" id="lemonsuperpdp_send_status" class="valignmiddle" title="'.dol_escape_htmltag($langs->trans('LemonSuperPDPSendStatusButton')).'">';
+				print img_picto($langs->trans('LemonSuperPDPSendStatusButton'), 'paper-plane', 'class="fas"');
+				print '</a>';
+				print '</div>';
+
 				print '<script>
 document.getElementById("lemonsuperpdp_send_status").addEventListener("click", function(e){
   e.preventDefault();
