@@ -136,7 +136,9 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 		$ev->direction = LemonSuperPDPEvent::DIRECTION_OUT;
 		$ev->event_date = dol_now();
 		$ev->payload_raw = json_encode($response);
-		$ev->create($user);
+		if ($ev->create($user) > 0) {
+			$ev->createActionComm($facture->id, $user);
+		}
 
 		// Met à jour le statut de la transmission.
 		$t->status = LemonSuperPDPTransmission::STATUS_PAID;

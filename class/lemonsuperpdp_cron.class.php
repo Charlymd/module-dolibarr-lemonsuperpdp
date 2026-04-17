@@ -119,6 +119,13 @@ class LemonSuperPDPCron
 					$newEv->event_date = !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now();
 					$newEv->payload_raw = json_encode($ev);
 					if ($newEv->create($user) > 0) {
+						// Lookup fk_facture pour créer l'action agenda associée
+						$sqlFK = "SELECT fk_facture FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission WHERE rowid = ".((int) $fkTransmission);
+						$resqlFK = $this->db->query($sqlFK);
+						if ($resqlFK && ($rowFK = $this->db->fetch_object($resqlFK))) {
+							$newEv->createActionComm((int) $rowFK->fk_facture, $user);
+							$this->db->free($resqlFK);
+						}
 						$nbInserted++;
 						$touchedTransmissions[$fkTransmission] = true;
 					}

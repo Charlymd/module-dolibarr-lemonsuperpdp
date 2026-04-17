@@ -695,6 +695,7 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			$newEv->event_date = !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now();
 			$newEv->payload_raw = json_encode($ev);
 			if ($newEv->create($user) > 0) {
+				$newEv->createActionComm($facture->id, $user);
 				$nbInserted++;
 			}
 		}
@@ -787,7 +788,9 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 		$ev->direction = LemonSuperPDPEvent::DIRECTION_OUT;
 		$ev->event_date = dol_now();
 		$ev->payload_raw = json_encode($response);
-		$ev->create($user);
+		if ($ev->create($user) > 0) {
+			$ev->createActionComm($facture->id, $user);
+		}
 
 		if ($statusCode === 'fr:212') {
 			$t->status = LemonSuperPDPTransmission::STATUS_PAID;

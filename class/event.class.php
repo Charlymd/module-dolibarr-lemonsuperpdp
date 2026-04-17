@@ -155,6 +155,51 @@ class LemonSuperPDPEvent extends CommonObject
 	}
 
 	/**
+	 * Crée une entrée dans llx_actioncomm pour faire apparaître l'event
+	 * dans l'onglet "Événements/Agenda" standard de la fiche facture.
+	 * Doit être appelé après create().
+	 *
+	 * @param int   $fkFacture  ID de la facture Dolibarr concernée
+	 * @param User  $user       Utilisateur courant
+	 * @return int              ID de l'action créée, ou 0 si erreur (non-bloquant)
+	 */
+	public function createActionComm($fkFacture, $user)
+	{
+		if (empty($fkFacture)) return 0;
+
+		require_once DOL_DOCUMENT_ROOT.'/comm/action/class/actioncomm.class.php';
+
+		$label = !empty($this->message) ? $this->message : self::getStatusLabel($this->status_code);
+		$dirSuffix = ($this->direction === self::DIRECTION_OUT) ? ' (émis)' : ' (reçu)';
+
+		$note = 'Événement SUPER PDP '.$this->status_code.' : '.$label.$dirSuffix;
+		if (!empty($this->superpdp_event_id)) {
+			$note .= "\nID SUPER PDP : ".((int) $this->superpdp_event_id);
+		}
+		if (!empty($this->payload_raw)) {
+			$note .= "\n\nPayload brut :\n".$this->payload_raw;
+		}
+
+		$ac = new ActionComm($this->db);
+		$ac->type_code = 'AC_OTH_AUTO';
+		$ac->code = 'LEMONSUPERPDP_'.strtoupper(str_replace(array(':', '-'), '_', $this->status_code));
+		$ac->label = 'SUPER PDP : '.$label.' ('.$this->status_code.')';
+		$ac->note_private = $note;
+		$ac->elementtype = 'facture';
+		$ac->fk_element = (int) $fkFacture;
+		$ac->datep = !empty($this->event_date) ? $this->event_date : dol_now();
+		$ac->datef = !empty($this->event_date) ? $this->event_date : dol_now();
+		$ac->percentage = -1;
+
+		$ret = $ac->create($user);
+		if ($ret < 0) {
+			dol_syslog('LemonSuperPDPEvent::createActionComm erreur : '.$ac->error, LOG_WARNING);
+			return 0;
+		}
+		return (int) $ret;
+	}
+
+	/**
 	 * Libellé humain d'un status_code AFNOR (fr:200..fr:212).
 	 * Utilisé en fallback quand l'API ne fournit pas de message.
 	 */
