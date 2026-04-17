@@ -176,7 +176,7 @@ class ActionsLemonSuperPDP
 
 		$langs->load("lemonsuperpdp@lemonsuperpdp");
 		$this->resprints = '<option value="dosendsuperpdp_bulk">'.dol_escape_htmltag($langs->trans('LemonSuperPDPSendSelected')).'</option>';
-		return 1;
+		return 0;
 	}
 
 	/**
