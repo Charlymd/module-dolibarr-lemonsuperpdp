@@ -404,9 +404,24 @@ class ActionsLemonSuperPDP
 				$pdfBinary = file_get_contents($pdfPath);
 				$xml = $reader->extractXML($pdfBinary, false);
 
-				// Substitutions ciblées : ">9 chiffres<" ou '"9 chiffres"'.
-				// Le pattern ne matche pas le SIRET (14 chiffres), donc SIRET et
-				// numéro TVA intracommunautaire restent intacts.
+				// Substitutions ciblées : SIREN + numéro TVA intracommunautaire.
+				// Règle BR-FR-09 : la clé TVA doit être cohérente avec le SIREN,
+				// formule FR : clé = (12 + 3 × (SIREN mod 97)) mod 97.
+				// Sans swap du numéro TVA, SUPER PDP rejette la facture comme
+				// "Invalide" (incohérence entre SIREN et racine du VAT FR).
+				$calcVat = function ($siren) {
+					$s = (int) preg_replace('/[^0-9]/', '', $siren);
+					$key = ((12 + 3 * ($s % 97)) % 97);
+					return 'FR'.str_pad((string) $key, 2, '0', STR_PAD_LEFT).str_pad((string) $s, 9, '0', STR_PAD_LEFT);
+				};
+				$fakeVendorVat = $calcVat($fakeSiren);
+				$realVendorVat = !empty($mysoc->tva_intra) ? preg_replace('/\s+/', '', $mysoc->tva_intra) : '';
+				$fakeClientVat = $calcVat($fakeClientSiren);
+				$realClientVat = '';
+				if (!empty($object->thirdparty) && !empty($object->thirdparty->tva_intra)) {
+					$realClientVat = preg_replace('/\s+/', '', $object->thirdparty->tva_intra);
+				}
+
 				$search = array('>'.$realSiren.'<', '"'.$realSiren.'"');
 				$replace = array('>'.$fakeSiren.'<', '"'.$fakeSiren.'"');
 				if (strlen($realClientSiren) === 9 && $realClientSiren !== $realSiren) {
@@ -414,6 +429,18 @@ class ActionsLemonSuperPDP
 					$search[] = '"'.$realClientSiren.'"';
 					$replace[] = '>'.$fakeClientSiren.'<';
 					$replace[] = '"'.$fakeClientSiren.'"';
+				}
+				if (!empty($realVendorVat)) {
+					$search[] = '>'.$realVendorVat.'<';
+					$search[] = '"'.$realVendorVat.'"';
+					$replace[] = '>'.$fakeVendorVat.'<';
+					$replace[] = '"'.$fakeVendorVat.'"';
+				}
+				if (!empty($realClientVat) && $realClientVat !== $realVendorVat) {
+					$search[] = '>'.$realClientVat.'<';
+					$search[] = '"'.$realClientVat.'"';
+					$replace[] = '>'.$fakeClientVat.'<';
+					$replace[] = '"'.$fakeClientVat.'"';
 				}
 				$patched = str_replace($search, $replace, $xml);
 
