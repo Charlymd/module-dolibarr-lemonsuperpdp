@@ -604,13 +604,31 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			setEventMessages($msg, null, 'mesgs');
 		} catch (SuperPDPException $e) {
 			dol_syslog('LemonSuperPDP: échec envoi facture '.$object->ref.' : '.$e->getMessage(), LOG_ERR);
-			$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
-			$t->error_message = $e->getMessage();
-			if ($e->responseBody) {
-				$t->payload_response = $e->responseBody;
+			// Cas edge : SUPER PDP nous dit que la facture est déjà présente.
+			// Le message contient l'id de la facture existante (ex : "La facture
+			// est déjà existante (id 39519)"). On en profite pour recoller la
+			// transmission locale à la facture distante plutôt que rester en
+			// état Error (évite de créer une nouvelle facture côté SUPER PDP
+			// juste parce qu'on a réinitialisé en local).
+			$recovered = false;
+			if ($e->httpCode === 400 && preg_match('/id\s+(\d+)/', $e->getMessage(), $m)) {
+				$t->superpdp_id = (int) $m[1];
+				$t->status = LemonSuperPDPTransmission::STATUS_SENT;
+				$t->error_message = null;
+				$t->payload_response = json_encode(array('recovered' => true, 'source_message' => $e->getMessage()));
+				$t->update($user);
+				$recovered = true;
+				setEventMessages($langs->trans('LemonSuperPDPRecoveredExisting', (int) $t->superpdp_id), null, 'warnings');
 			}
-			$t->update($user);
-			setEventMessages($langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(), null, 'errors');
+			if (!$recovered) {
+				$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
+				$t->error_message = $e->getMessage();
+				if ($e->responseBody) {
+					$t->payload_response = $e->responseBody;
+				}
+				$t->update($user);
+				setEventMessages($langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(), null, 'errors');
+			}
 		} catch (Exception $e) {
 			dol_syslog('LemonSuperPDP: exception envoi : '.$e->getMessage(), LOG_ERR);
 			$t->status = LemonSuperPDPTransmission::STATUS_ERROR;

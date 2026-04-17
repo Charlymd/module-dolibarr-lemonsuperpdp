@@ -83,6 +83,7 @@ LemonSuperPDPSendStatusConfirm = Confirmer l'envoi du statut
 LemonSuperPDPStatusSent = Statut envoyé avec succès
 LemonSuperPDPStatusSendError = Échec de l'envoi du statut
 LemonSuperPDPStatusInvalid = Code de statut invalide
+LemonSuperPDPRecoveredExisting = Facture déjà présente côté SUPER PDP : lien rétabli avec l'ID existant %s
 
 # >>> SANDBOX MODE - À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 # Voir en-tête class/actions_lemonsuperpdp.class.php

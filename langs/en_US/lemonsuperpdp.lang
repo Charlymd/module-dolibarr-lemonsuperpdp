@@ -73,6 +73,7 @@ LemonSuperPDPSendStatusConfirm = Confirm sending status
 LemonSuperPDPStatusSent = Status sent successfully
 LemonSuperPDPStatusSendError = Failed to send status
 LemonSuperPDPStatusInvalid = Invalid status code
+LemonSuperPDPRecoveredExisting = Invoice already exists on SUPER PDP: local transmission relinked to existing ID %s
 
 # >>> SANDBOX MODE - TO BE REMOVED AFTER PILOT PHASE <<<
 LemonSuperPDPSandboxMode = Sandbox mode (pilot phase)
