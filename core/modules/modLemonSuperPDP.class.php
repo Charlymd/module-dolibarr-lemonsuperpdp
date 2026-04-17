@@ -84,6 +84,25 @@ class modLemonSuperPDP extends DolibarrModules
 			$conf->lemonsuperpdp->enabled = 0;
 		}
 
+		// Tâches planifiées : synchronisation périodique des events SUPER PDP.
+		// Automatiquement créées dans llx_cronjob à l'activation du module.
+		$this->cronjobs = array(
+			0 => array(
+				'label' => 'Sync events SUPER PDP',
+				'jobtype' => 'method',
+				'class' => '/lemonsuperpdp/class/lemonsuperpdp_cron.class.php',
+				'objectname' => 'LemonSuperPDPCron',
+				'method' => 'syncEvents',
+				'parameters' => '',
+				'comment' => 'Récupère les événements de cycle de vie depuis l\'API SUPER PDP (fr:200..fr:212).',
+				'frequency' => 15,
+				'unitfrequency' => 60,          // 60 = minute
+				'priority' => 50,
+				'status' => 1,                   // 1 = activé par défaut
+				'test' => '$conf->lemonsuperpdp->enabled',
+			),
+		);
+
 		$this->rights = array();
 		$r = 0;
 
