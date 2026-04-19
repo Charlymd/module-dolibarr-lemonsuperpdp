@@ -551,7 +551,11 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 
 		$pdfPath = $this->getInvoicePdfPath($facture);
 		if (!file_exists($pdfPath)) {
-			return array('outcome' => 'skipped-nopdf', 'message' => $langs->trans('LemonSuperPDPPdfNotFound').' : '.$pdfPath);
+			// On ne renvoie PAS le chemin absolu dans l'UI : le syslog suffit
+			// côté admin, et on évite d'exposer la structure filesystem à un
+			// utilisateur qui aurait seulement la permission 'ecrire'.
+			dol_syslog('LemonSuperPDP: PDF introuvable pour facture '.$facture->ref.' : '.$pdfPath, LOG_WARNING);
+			return array('outcome' => 'skipped-nopdf', 'message' => $langs->trans('LemonSuperPDPPdfNotFound'));
 		}
 
 		$format = getDolGlobalString('LEMONSUPERPDP_FORMAT', 'facturx');

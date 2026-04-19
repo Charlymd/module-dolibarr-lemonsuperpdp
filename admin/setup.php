@@ -56,6 +56,13 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	if (empty($endpoint)) {
 		$endpoint = 'https://api.superpdp.tech';
 	}
+	// Mitigation SSRF : on refuse un endpoint non-HTTPS. Ça évite qu'un
+	// admin pointe (volontairement ou non) vers http://localhost:XXX et
+	// se retrouve à y envoyer le Bearer token OAuth.
+	if (!preg_match('#^https://#i', $endpoint)) {
+		setEventMessages($langs->trans('LemonSuperPDPEndpointMustBeHttps'), null, 'errors');
+		$error++;
+	}
 
 	if (dolibarr_set_const($db, 'LEMONSUPERPDP_ENABLED', $enabled, 'int', 0, '', $conf->entity) < 0) {
 		$error++;

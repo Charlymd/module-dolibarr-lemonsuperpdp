@@ -32,6 +32,7 @@ LemonSuperPDPDiagFacturXEnabled = <a href="%s/custom/lemonfacturx/admin/setup.ph
 LemonSuperPDPDiagFacturXDisabled = <a href="%s/admin/modules.php" target="_blank" rel="noopener">LemonFacturX</a> module required but not enabled
 LemonSuperPDPDiagCredentialsSet = OAuth credentials set
 LemonSuperPDPDiagCredentialsMissing = OAuth credentials missing (client_id and/or client_secret)
+LemonSuperPDPEndpointMustBeHttps = The SUPER PDP endpoint must use HTTPS (SSRF mitigation)
 LemonSuperPDPDiagSellerSIRET = Your company SIRET
 LemonSuperPDPDiagSellerSIRETMissing = Your company SIRET is missing (Home > Setup > Company)
 LemonSuperPDPDiagAllOk = Configuration complete, ready to use
