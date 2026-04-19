@@ -78,9 +78,10 @@ class LemonSuperPDPCron
 		dol_include_once('/lemonsuperpdp/class/event.class.php');
 
 		$client = new SuperPDPClient($this->db);
-		$evObj = new LemonSuperPDPEvent($this->db);
+		$tObj = new LemonSuperPDPTransmission($this->db);
 
-		$lastId = (int) getDolGlobalString('LEMONSUPERPDP_LAST_EVENT_ID', '0');
+		$initialLastId = (int) getDolGlobalString('LEMONSUPERPDP_LAST_EVENT_ID', '0');
+		$lastId = $initialLastId;
 		$nbInserted = 0;
 		$nbPages = 0;
 		$touchedTransmissions = array();
@@ -93,43 +94,29 @@ class LemonSuperPDPCron
 				$data = !empty($resp['data']) && is_array($resp['data']) ? $resp['data'] : array();
 				$hasAfter = !empty($resp['has_after']);
 
+				// Regroupement par invoice_id : une seule résolution transmission
+				// par facture, même si la page contient plusieurs events liés.
+				$eventsByInvoice = array();
 				foreach ($data as $ev) {
-					if (empty($ev['id']) || empty($ev['status_code'])) continue;
+					if (empty($ev['id']) || empty($ev['status_code']) || empty($ev['invoice_id'])) continue;
 					$lastId = max($lastId, (int) $ev['id']);
+					$eventsByInvoice[(int) $ev['invoice_id']][] = $ev;
+				}
 
-					if ($evObj->existsBySuperpdpId((int) $ev['id'])) continue;
+				foreach ($eventsByInvoice as $invoiceId => $invoiceEvents) {
+					$info = $tObj->fetchIdAndFactureBySuperpdpId($invoiceId);
+					if ($info === null) continue;
 
-					$invoiceId = !empty($ev['invoice_id']) ? (int) $ev['invoice_id'] : 0;
-					if ($invoiceId <= 0) continue;
-
-					// Une seule requête pour récupérer rowid + fk_facture
-					// (évite le N+1 quand on crée l'action agenda juste après).
-					$sql = "SELECT rowid, fk_facture FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
-					$sql .= " WHERE superpdp_id = ".((int) $invoiceId);
-					$sql .= " LIMIT 1";
-					$sqlRes = $this->db->query($sql);
-					$fkTransmission = 0;
-					$fkFacture = 0;
-					if ($sqlRes && ($row = $this->db->fetch_object($sqlRes))) {
-						$fkTransmission = (int) $row->rowid;
-						$fkFacture = (int) $row->fk_facture;
-						$this->db->free($sqlRes);
-					}
-					if ($fkTransmission <= 0) continue;
-
-					$inserted = LemonSuperPDPEvent::createAndLog($this->db, array(
-						'fk_transmission'   => $fkTransmission,
-						'superpdp_event_id' => (int) $ev['id'],
-						'status_code'       => (string) $ev['status_code'],
-						'message'           => !empty($ev['message']) ? (string) $ev['message'] : null,
-						'direction'         => LemonSuperPDPEvent::DIRECTION_IN,
-						'event_date'        => !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now(),
-						'payload_raw'       => json_encode($ev),
-					), $user, $fkFacture > 0 ? $fkFacture : null);
-
-					if ($inserted > 0) {
-						$nbInserted++;
-						$touchedTransmissions[$fkTransmission] = true;
+					$result = LemonSuperPDPEvent::syncFromApiPayload(
+						$this->db,
+						$invoiceEvents,
+						$info['id'],
+						$info['fk_facture'] > 0 ? $info['fk_facture'] : null,
+						$user
+					);
+					if ($result['inserted'] > 0) {
+						$nbInserted += $result['inserted'];
+						$touchedTransmissions[$info['id']] = true;
 					}
 				}
 			}
@@ -138,7 +125,11 @@ class LemonSuperPDPCron
 			// d'après son dernier event.
 			$this->updateTransmissionsStatusFromEvents(array_keys($touchedTransmissions), $user);
 
-			dolibarr_set_const($this->db, 'LEMONSUPERPDP_LAST_EVENT_ID', (string) $lastId, 'chaine', 0, '', 0);
+			// Écriture du curseur uniquement si avancement : évite d'écrire
+			// une constante à chaque passe de cron quand rien ne bouge.
+			if ($lastId !== $initialLastId) {
+				dolibarr_set_const($this->db, 'LEMONSUPERPDP_LAST_EVENT_ID', (string) $lastId, 'chaine', 0, '', 0);
+			}
 
 			$this->output = $nbInserted.' nouvel(s) événement(s) inséré(s), dernier id = '.$lastId.', '.$nbPages.' pages lues';
 			return 0;
@@ -152,29 +143,42 @@ class LemonSuperPDPCron
 	/**
 	 * Pour chaque transmission en paramètre, recalcule le status local à
 	 * partir de son event le plus récent.
+	 *
+	 * Stratégie : un seul SELECT IN sur tous les fkTransmissions touchés,
+	 * tri décroissant par date, retenue du premier vu par transmission côté
+	 * PHP. Puis UPDATE direct (sans fetch intermédiaire) pour mettre à jour
+	 * status + status_raw.
 	 */
 	private function updateTransmissionsStatusFromEvents($fkTransmissions, $user)
 	{
 		if (empty($fkTransmissions)) return;
 
-		foreach ($fkTransmissions as $fkT) {
-			$sql = "SELECT status_code FROM ".MAIN_DB_PREFIX."lemonsuperpdp_event";
-			$sql .= " WHERE fk_transmission = ".((int) $fkT);
-			$sql .= " ORDER BY event_date DESC, rowid DESC LIMIT 1";
-			$resql = $this->db->query($sql);
-			if (!$resql) continue;
-			$row = $this->db->fetch_object($resql);
-			$this->db->free($resql);
-			if (empty($row)) continue;
+		$ids = array_map('intval', $fkTransmissions);
+		$sql = "SELECT fk_transmission, status_code FROM ".MAIN_DB_PREFIX."lemonsuperpdp_event";
+		$sql .= " WHERE fk_transmission IN (".implode(',', $ids).")";
+		$sql .= " ORDER BY event_date DESC, rowid DESC";
 
-			$t = new LemonSuperPDPTransmission($this->db);
-			if ($t->fetch($fkT) <= 0) continue;
-			$t->status_raw = $row->status_code;
-			$mapped = LemonSuperPDPTransmission::mapStatusFromEventCode($row->status_code);
-			if ($mapped !== null) {
-				$t->status = $mapped;
+		$resql = $this->db->query($sql);
+		if (!$resql) return;
+
+		$latestByTransmission = array();
+		while ($row = $this->db->fetch_object($resql)) {
+			$fkT = (int) $row->fk_transmission;
+			if (!isset($latestByTransmission[$fkT])) {
+				$latestByTransmission[$fkT] = (string) $row->status_code;
 			}
-			$t->update($user);
+		}
+		$this->db->free($resql);
+
+		foreach ($latestByTransmission as $fkT => $lastCode) {
+			$mapped = LemonSuperPDPTransmission::mapStatusFromEventCode($lastCode);
+			$setStatus = ($mapped !== null) ? ", status = '".$this->db->escape($mapped)."'" : '';
+			$upd = "UPDATE ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
+			$upd .= " SET status_raw = '".$this->db->escape($lastCode)."'";
+			$upd .= $setStatus;
+			$upd .= ", date_status_update = '".$this->db->idate(dol_now())."'";
+			$upd .= " WHERE rowid = ".((int) $fkT);
+			$this->db->query($upd);
 		}
 	}
 }

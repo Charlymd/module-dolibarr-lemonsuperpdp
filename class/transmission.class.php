@@ -185,15 +185,46 @@ class LemonSuperPDPTransmission extends CommonObject
 
 		$resql = $this->db->query($sql);
 		if ($resql) {
+			$found = 0;
 			if ($this->db->num_rows($resql)) {
 				$obj = $this->db->fetch_object($resql);
 				$this->_setFromRow($obj);
-				return 1;
+				$found = 1;
 			}
-			return 0;
+			$this->db->free($resql);
+			return $found;
 		}
 		$this->error = $this->db->lasterror();
 		return -1;
+	}
+
+	/**
+	 * Résout un superpdp_id vers {rowid transmission, fk_facture Dolibarr}.
+	 * Utilisé par le cron de polling pour rattacher un event entrant à sa
+	 * transmission locale sans exposer le SQL aux appelants.
+	 *
+	 * @param int $superpdpId  ID de facture côté SUPER PDP
+	 * @return array|null      ['id' => int, 'fk_facture' => int] ou null si absent
+	 */
+	public function fetchIdAndFactureBySuperpdpId($superpdpId)
+	{
+		$sql = "SELECT rowid, fk_facture FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
+		$sql .= " WHERE superpdp_id = ".((int) $superpdpId);
+		$sql .= " LIMIT 1";
+
+		$resql = $this->db->query($sql);
+		if (!$resql) {
+			$this->error = $this->db->lasterror();
+			return null;
+		}
+		$row = $this->db->fetch_object($resql);
+		$this->db->free($resql);
+		if (empty($row)) return null;
+
+		return array(
+			'id' => (int) $row->rowid,
+			'fk_facture' => (int) $row->fk_facture,
+		);
 	}
 
 	/**

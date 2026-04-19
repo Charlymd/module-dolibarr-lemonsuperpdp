@@ -37,6 +37,23 @@ class LemonSuperPDPEvent extends CommonObject
 	const DIRECTION_IN  = 'in';
 	const DIRECTION_OUT = 'out';
 
+	// Codes AFNOR du cycle de vie facture électronique (spec DGFiP / PA).
+	// Utilisés partout dans le module, centralisés ici pour éviter les
+	// strings magiques et faciliter la migration future vers la spec v2.
+	const STATUS_DEPOSEE              = 'fr:200';
+	const STATUS_REJET_EMETTRICE      = 'fr:201';
+	const STATUS_RECUE_DESTINATAIRE   = 'fr:202';
+	const STATUS_REJET_DESTINATAIRE   = 'fr:203';
+	const STATUS_MISE_A_DISPOSITION   = 'fr:204';
+	const STATUS_PRISE_EN_CHARGE      = 'fr:205';
+	const STATUS_APPROUVEE            = 'fr:206';
+	const STATUS_APPROUVEE_PARTIELLE  = 'fr:207';
+	const STATUS_PAIEMENT_EN_COURS    = 'fr:208';
+	const STATUS_PAIEMENT_TRANSMIS    = 'fr:209';
+	const STATUS_REFUSEE              = 'fr:210';
+	const STATUS_LITIGE               = 'fr:211';
+	const STATUS_ENCAISSEE            = 'fr:212';
+
 	public function __construct($db)
 	{
 		$this->db = $db;
@@ -128,6 +145,65 @@ class LemonSuperPDPEvent extends CommonObject
 			$ev->createActionComm((int) $fkFacture, $user);
 		}
 		return $ret;
+	}
+
+	/**
+	 * Ingestion d'un lot d'events API SUPER PDP pour une transmission donnée.
+	 *
+	 * Factorise la logique commune à trois appelants :
+	 *  - ActionsLemonSuperPDP::refreshEventsForFacture (bouton Rafraîchir)
+	 *  - LemonSuperPDPCron::syncEvents               (cron de polling)
+	 *  - scripts/cron_sync_events.php                (cron CLI alternatif)
+	 *
+	 * Pour chaque event du payload : filtre les doublons (par superpdp_event_id),
+	 * insère via createAndLog() et repère le statut le plus récent.
+	 *
+	 * @param DoliDB   $db              Connexion base
+	 * @param array    $events          Tableau d'events tels que renvoyés par
+	 *                                  l'API (attendus : id, status_code,
+	 *                                  message, created_at)
+	 * @param int      $fkTransmission  ID transmission locale
+	 * @param int|null $fkFacture       ID facture pour l'action agenda (null = pas d'action)
+	 * @param User     $user            Utilisateur qui enregistre
+	 *
+	 * @return array{inserted:int, lastStatusCode:?string, lastTimestamp:int}
+	 */
+	public static function syncFromApiPayload($db, array $events, $fkTransmission, $fkFacture, $user)
+	{
+		$inserted = 0;
+		$lastStatusCode = null;
+		$lastTs = 0;
+
+		$evProbe = new self($db);
+		foreach ($events as $ev) {
+			if (empty($ev['id']) || empty($ev['status_code'])) continue;
+
+			$ts = !empty($ev['created_at']) ? strtotime($ev['created_at']) : 0;
+			if ($ts >= $lastTs) {
+				$lastTs = $ts;
+				$lastStatusCode = (string) $ev['status_code'];
+			}
+
+			if ($evProbe->existsBySuperpdpId((int) $ev['id'])) continue;
+
+			$ret = self::createAndLog($db, array(
+				'fk_transmission'   => (int) $fkTransmission,
+				'superpdp_event_id' => (int) $ev['id'],
+				'status_code'       => (string) $ev['status_code'],
+				'message'           => !empty($ev['message']) ? (string) $ev['message'] : null,
+				'direction'         => self::DIRECTION_IN,
+				'event_date'        => $ts > 0 ? $ts : dol_now(),
+				'payload_raw'       => json_encode($ev),
+			), $user, !empty($fkFacture) ? (int) $fkFacture : null);
+
+			if ($ret > 0) $inserted++;
+		}
+
+		return array(
+			'inserted' => $inserted,
+			'lastStatusCode' => $lastStatusCode,
+			'lastTimestamp' => $lastTs,
+		);
 	}
 
 	/**

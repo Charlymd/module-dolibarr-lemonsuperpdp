@@ -100,36 +100,26 @@ class SuperPDPClient
 
 		dol_syslog('SuperPDPClient::refreshAccessToken POST '.$url, LOG_DEBUG);
 
-		$ch = curl_init($url);
-		curl_setopt($ch, CURLOPT_POST, true);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
-		curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+		$call = $this->httpCall('POST', $url, $body, array(
 			'Content-Type: application/x-www-form-urlencoded',
 			'Accept: application/json',
-		));
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+		), 20);
 
-		$response = curl_exec($ch);
-		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		$curlError = curl_error($ch);
-		curl_close($ch);
-
-		if ($curlError) {
-			dol_syslog('SuperPDPClient::refreshAccessToken curl error : '.$curlError, LOG_ERR);
-			throw new SuperPDPException('Erreur réseau : '.$curlError);
+		if ($call['error']) {
+			dol_syslog('SuperPDPClient::refreshAccessToken curl error : '.$call['error'], LOG_ERR);
+			throw new SuperPDPException('Erreur réseau : '.$call['error']);
 		}
 
-		if ($httpCode !== 200) {
+		if ($call['httpCode'] !== 200) {
 			// On ne logue PAS la réponse brute ici : elle peut contenir un
 			// access_token partiel en cas de bug côté API.
-			dol_syslog('SuperPDPClient::refreshAccessToken HTTP '.$httpCode, LOG_ERR);
-			throw new SuperPDPException('Échec d\'authentification OAuth (HTTP '.$httpCode.')', $httpCode, $response);
+			dol_syslog('SuperPDPClient::refreshAccessToken HTTP '.$call['httpCode'], LOG_ERR);
+			throw new SuperPDPException('Échec d\'authentification OAuth (HTTP '.$call['httpCode'].')', $call['httpCode'], $call['body']);
 		}
 
-		$data = json_decode($response, true);
+		$data = json_decode($call['body'], true);
 		if (!is_array($data) || empty($data['access_token'])) {
-			throw new SuperPDPException('Réponse OAuth inattendue', $httpCode, $response);
+			throw new SuperPDPException('Réponse OAuth inattendue', $call['httpCode'], $call['body']);
 		}
 
 		$expiresIn = isset($data['expires_in']) ? (int) $data['expires_in'] : 3600;
@@ -239,49 +229,76 @@ class SuperPDPClient
 
 		dol_syslog('SuperPDPClient::request '.$method.' '.$url, LOG_DEBUG);
 
-		$ch = curl_init($url);
-		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_TIMEOUT, 60);
-
 		$headers = array(
 			'Authorization: Bearer '.$token,
 			'Accept: application/json',
 		);
 		if ($body !== null) {
 			$headers[] = 'Content-Type: '.$contentType;
-			curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
-		}
-		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-		$response = curl_exec($ch);
-		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		$curlError = curl_error($ch);
-		curl_close($ch);
-
-		if ($curlError) {
-			dol_syslog('SuperPDPClient::request curl error : '.$curlError, LOG_ERR);
-			throw new SuperPDPException('Erreur réseau : '.$curlError);
 		}
 
-		if ($httpCode < 200 || $httpCode >= 300) {
+		$call = $this->httpCall($method, $url, $body, $headers, 60);
+
+		if ($call['error']) {
+			dol_syslog('SuperPDPClient::request curl error : '.$call['error'], LOG_ERR);
+			throw new SuperPDPException('Erreur réseau : '.$call['error']);
+		}
+
+		if ($call['httpCode'] < 200 || $call['httpCode'] >= 300) {
 			// Tronque à 500 chars pour éviter de pourrir les logs avec des
 			// réponses massives et pour limiter le risque de fuite de tokens
 			// inclus dans un payload d'erreur inhabituel.
-			dol_syslog('SuperPDPClient::request HTTP '.$httpCode.' : '.dol_trunc((string) $response, 500), LOG_ERR);
-			$msg = 'Erreur API SUPER PDP (HTTP '.$httpCode.')';
-			$decoded = json_decode($response, true);
+			dol_syslog('SuperPDPClient::request HTTP '.$call['httpCode'].' : '.dol_trunc((string) $call['body'], 500), LOG_ERR);
+			$msg = 'Erreur API SUPER PDP (HTTP '.$call['httpCode'].')';
+			$decoded = json_decode($call['body'], true);
 			if (is_array($decoded) && !empty($decoded['message'])) {
 				$msg .= ' : '.$decoded['message'];
 			}
-			throw new SuperPDPException($msg, $httpCode, $response);
+			throw new SuperPDPException($msg, $call['httpCode'], $call['body']);
 		}
 
-		$decoded = json_decode($response, true);
+		$decoded = json_decode($call['body'], true);
 		if (!is_array($decoded)) {
-			throw new SuperPDPException('Réponse non-JSON reçue', $httpCode, $response);
+			throw new SuperPDPException('Réponse non-JSON reçue', $call['httpCode'], $call['body']);
 		}
 
 		return $decoded;
+	}
+
+	/**
+	 * Exécute un appel HTTP et retourne un résultat normalisé.
+	 *
+	 * On reste sur curl plutôt que getURLContent() pour pouvoir contrôler
+	 * finement le timeout (20s auth, 60s upload de PDF) et envoyer des
+	 * bodies binaires (PDF Factur-X en POST brut).
+	 *
+	 * @param string $method   Verbe HTTP (GET, POST, PUT, ...)
+	 * @param string $url      URL absolue
+	 * @param mixed  $body     Corps brut (string) ou null
+	 * @param array  $headers  Headers au format ['Header: valeur', ...]
+	 * @param int    $timeout  Timeout en secondes
+	 * @return array{body:string,httpCode:int,error:string}
+	 */
+	private function httpCall($method, $url, $body, array $headers, $timeout)
+	{
+		$ch = curl_init($url);
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_TIMEOUT, (int) $timeout);
+		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+		if ($body !== null) {
+			curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+		}
+
+		$response = curl_exec($ch);
+		$httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$curlError = curl_error($ch);
+		curl_close($ch);
+
+		return array(
+			'body' => (string) $response,
+			'httpCode' => $httpCode,
+			'error' => (string) $curlError,
+		);
 	}
 }

@@ -54,6 +54,9 @@ class ActionsLemonSuperPDP
 	public $resprints;
 	public $errors = array();
 
+	/** Cache mémoire de la dernière transmission par facture (hot-path fiche). */
+	private $transmissionCache = array();
+
 	public function __construct($db)
 	{
 		$this->db = $db;
@@ -67,6 +70,28 @@ class ActionsLemonSuperPDP
 		global $conf;
 		$ref = dol_sanitizeFileName($invoice->ref);
 		return $conf->facture->dir_output.'/'.$ref.'/'.$ref.'.pdf';
+	}
+
+	/**
+	 * Retourne la dernière transmission d'une facture, en mémo-cache pour
+	 * éviter 2-3 queries SQL redondantes sur le même affichage de fiche
+	 * (les hooks addMoreActionsButtons + formObjectOptions sont appelés
+	 * l'un après l'autre sur le même request).
+	 *
+	 * @param int $fkFacture
+	 * @return LemonSuperPDPTransmission|null  Objet hydraté, ou null si aucune transmission.
+	 */
+	private function getLastTransmission($fkFacture)
+	{
+		$fkFacture = (int) $fkFacture;
+		if (array_key_exists($fkFacture, $this->transmissionCache)) {
+			return $this->transmissionCache[$fkFacture];
+		}
+		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
+		$t = new LemonSuperPDPTransmission($this->db);
+		$found = $t->fetchLastByFacture($fkFacture);
+		$this->transmissionCache[$fkFacture] = ($found > 0) ? $t : null;
+		return $this->transmissionCache[$fkFacture];
 	}
 
 	/**
@@ -133,10 +158,12 @@ class ActionsLemonSuperPDP
 
 		$langs->load("lemonsuperpdp@lemonsuperpdp");
 
-		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
-		$t = new LemonSuperPDPTransmission($this->db);
-		$hasSuccess = $t->hasSuccessfulTransmission($object->id);
-		$lastFetched = $t->fetchLastByFacture($object->id);
+		$t = $this->getLastTransmission($object->id);
+		$hasSuccess = ($t !== null && in_array($t->status, array(
+			LemonSuperPDPTransmission::STATUS_SENT,
+			LemonSuperPDPTransmission::STATUS_ACCEPTED,
+			LemonSuperPDPTransmission::STATUS_PAID,
+		), true));
 
 		// Bouton d'envoi : uniquement si facture validée et non déjà transmise avec succès
 		if (!$hasSuccess) {
@@ -165,19 +192,17 @@ class ActionsLemonSuperPDP
 	 */
 	public function formObjectOptions($parameters, &$object, &$action, $hookmanager)
 	{
-		global $langs;
+		global $langs, $user;
 
 		if (!$this->isInvoiceContextAllowed($parameters, $object, array('invoicecard'))) return 0;
 
 		$langs->load("lemonsuperpdp@lemonsuperpdp");
 
-		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
-		$t = new LemonSuperPDPTransmission($this->db);
-		$found = $t->fetchLastByFacture($object->id);
+		$t = $this->getLastTransmission($object->id);
 
 		print '<tr><td>'.$langs->trans('LemonSuperPDPTransmissionLabel').'</td>';
 		print '<td>';
-		if ($found > 0) {
+		if ($t !== null) {
 			print '<span class="badge '.$t->getBadgeClass().'">'.$langs->trans($t->getStatusLabelKey()).'</span>';
 			if (!empty($t->superpdp_id)) {
 				print ' <span class="opacitymedium">ID SUPER PDP : '.((int) $t->superpdp_id).'</span>';
@@ -219,7 +244,6 @@ class ActionsLemonSuperPDP
 			}
 
 			// Actions : rafraîchir + envoyer un statut, en liens inline discrets.
-			global $user;
 			if ($user->hasRight('lemonsuperpdp', 'transmission', 'ecrire') && !empty($t->superpdp_id)) {
 				$refreshUrl = $_SERVER['PHP_SELF'].'?action=refreshsuperpdpevents&id='.((int) $object->id).'&token='.newToken();
 				$emittable = LemonSuperPDPEvent::getEmittableStatuses();
@@ -258,7 +282,6 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			// En prod réelle, on ne réinitialise pas une transmission : si la
 			// facture a été envoyée par erreur, on émet un avoir Dolibarr.
 			if (getDolGlobalInt('LEMONSUPERPDP_SANDBOX_MODE')) {
-				global $user;
 				if ($user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
 					$resetUrl = $_SERVER['PHP_SELF'].'?action=resettransmissionsuperpdp&id='.((int) $object->id).'&token='.newToken();
 					print '<br><a href="'.dol_escape_htmltag($resetUrl).'" class="opacitymedium" onclick="return confirm(\''.dol_escape_js($langs->trans('LemonSuperPDPResetConfirm')).'\')">';
@@ -307,7 +330,7 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 	 */
 	public function doMassActions($parameters, &$object, &$action, $hookmanager)
 	{
-		global $langs, $user, $conf, $db;
+		global $langs, $user, $db;
 
 		if ($action !== 'dosendsuperpdp_bulk') return 0;
 		if (!isModEnabled('lemonsuperpdp')) return 0;
@@ -341,36 +364,17 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 				$nbKo++;
 				continue;
 			}
-			// On réutilise la même logique que l'envoi unitaire via doActions.
-			// Pour garder le code simple et éviter la duplication, on met $action
-			// à 'dosendsuperpdp' juste le temps d'un appel, puis on le restaure.
-			$bulkAction = 'dosendsuperpdp';
-			$this->doActions($parameters, $facture, $bulkAction, $hookmanager);
-			// doActions réinitialise $bulkAction = ''. On regarde la dernière
-			// transmission pour savoir si ça a passé.
-			dol_include_once('/lemonsuperpdp/class/transmission.class.php');
-			$t = new LemonSuperPDPTransmission($db);
-			if ($t->fetchLastByFacture($facture->id) > 0) {
-				if ($t->status === LemonSuperPDPTransmission::STATUS_SENT) {
-					$nbOk++;
-				} elseif ($t->status === LemonSuperPDPTransmission::STATUS_ERROR) {
-					$nbKo++;
-				} else {
-					$nbSkipped++;
-				}
-			} else {
-				$nbSkipped++;
+			$outcome = $this->sendOneInvoice($facture, $user);
+			switch ($outcome) {
+				case 'ok':       $nbOk++; break;
+				case 'error':    $nbKo++; break;
+				default:         $nbSkipped++; break;
 			}
 		}
 
 		$summary = $langs->trans('LemonSuperPDPBulkResult', $nbOk, $nbKo, $nbSkipped);
-		if ($nbKo === 0 && $nbOk > 0) {
-			setEventMessages($summary, null, 'mesgs');
-		} elseif ($nbKo > 0) {
-			setEventMessages($summary, null, 'warnings');
-		} else {
-			setEventMessages($summary, null, 'mesgs');
-		}
+		$style = ($nbKo > 0) ? 'warnings' : 'mesgs';
+		setEventMessages($summary, null, $style);
 
 		return 0;
 	}
@@ -481,9 +485,9 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 	// >>> FIN SANDBOX MODE <<<
 
 	/**
-	 * Envoie la facture à SUPER PDP via POST /v1.beta/invoices et enregistre
-	 * la transmission résultante (succès, récupération d'un cas "déjà
-	 * existante", ou erreur).
+	 * Handler action 'dosendsuperpdp' : CSRF + permission, délégation à
+	 * sendOneInvoice(), puis traduction de l'outcome en setEventMessages.
+	 * Réutilise sendOneInvoice() pour partager la logique avec le bulk.
 	 */
 	private function handleSendInvoice(&$object, &$action)
 	{
@@ -491,146 +495,103 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 
 		if (!$this->checkCsrfAndRight($action, 'ecrire')) return 0;
 
-		if (((int) $object->statut) < 1) {
-			setEventMessages($langs->trans('LemonSuperPDPSendInvoiceDraft'), null, 'errors');
-			$action = '';
-			return 0;
+		$result = $this->sendOneInvoice($object, $user);
+		$msg = !empty($result['message']) ? $result['message'] : '';
+
+		switch ($result['outcome']) {
+			case 'ok':
+				setEventMessages($msg !== '' ? $msg : $langs->trans('LemonSuperPDPSendSuccess'), null, 'mesgs');
+				break;
+			case 'ok-recovered':
+				setEventMessages($msg, null, 'warnings');
+				break;
+			case 'skipped-already':
+				setEventMessages($langs->trans('LemonSuperPDPAlreadySent'), null, 'warnings');
+				break;
+			case 'skipped-draft':
+			case 'skipped-nopdf':
+			case 'skipped-create':
+			case 'error':
+			default:
+				setEventMessages($msg !== '' ? $msg : $langs->trans('LemonSuperPDPSendError'), null, 'errors');
+				break;
+		}
+
+		$this->transmissionCache = array(); // le statut vient de changer, invalide le cache
+		$action = '';
+		return 0;
+	}
+
+	/**
+	 * Envoi effectif d'une facture à SUPER PDP : crée la ligne transmission,
+	 * applique le patch sandbox si activé, appelle l'API, met à jour le
+	 * statut de la transmission. Ne touche JAMAIS à $action ni
+	 * setEventMessages : appelé à la fois par le handler unitaire et par la
+	 * boucle bulk, chaque appelant traduit l'outcome à sa sauce.
+	 *
+	 * @param Facture $facture  Facture Dolibarr (fetch déjà fait)
+	 * @param User    $user     Utilisateur qui déclenche l'envoi
+	 * @return array{outcome:string, message:string, transmissionId?:int}
+	 *         outcome ∈ {ok, ok-recovered, error, skipped-draft,
+	 *         skipped-already, skipped-nopdf, skipped-create}
+	 */
+	public function sendOneInvoice($facture, $user)
+	{
+		global $langs;
+
+		if (((int) $facture->statut) < 1) {
+			return array('outcome' => 'skipped-draft', 'message' => $langs->trans('LemonSuperPDPSendInvoiceDraft'));
 		}
 
 		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
 		$t = new LemonSuperPDPTransmission($this->db);
-		if ($t->hasSuccessfulTransmission($object->id)) {
-			setEventMessages($langs->trans('LemonSuperPDPAlreadySent'), null, 'warnings');
-			$action = '';
-			return 0;
+		if ($t->hasSuccessfulTransmission($facture->id)) {
+			return array('outcome' => 'skipped-already', 'message' => $langs->trans('LemonSuperPDPAlreadySent'));
 		}
 
-		$pdfPath = $this->getInvoicePdfPath($object);
+		$pdfPath = $this->getInvoicePdfPath($facture);
 		if (!file_exists($pdfPath)) {
-			setEventMessages($langs->trans('LemonSuperPDPPdfNotFound').' : '.$pdfPath, null, 'errors');
-			$action = '';
-			return 0;
+			return array('outcome' => 'skipped-nopdf', 'message' => $langs->trans('LemonSuperPDPPdfNotFound').' : '.$pdfPath);
 		}
 
 		$format = getDolGlobalString('LEMONSUPERPDP_FORMAT', 'facturx');
 		$formatSent = $format;
 		$fileToSend = $pdfPath;
 
-		// Créer la ligne transmission en pending
-		$t->fk_facture = $object->id;
+		// Ligne transmission en pending dès le début : trace l'intention
+		// d'envoi même si l'API SUPER PDP plante derrière.
+		$t->fk_facture = $facture->id;
 		$t->format_sent = $format;
 		$t->status = LemonSuperPDPTransmission::STATUS_PENDING;
 		if ($t->create($user) < 0) {
 			dol_syslog('LemonSuperPDP: erreur création transmission : '.$t->error, LOG_ERR);
-			setEventMessages($langs->trans('LemonSuperPDPCreateError'), null, 'errors');
-			$action = '';
-			return 0;
+			return array('outcome' => 'skipped-create', 'message' => $langs->trans('LemonSuperPDPCreateError'));
 		}
 
-		// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
-		// Contournement phase pilote : le SIREN émetteur réel ($mysoc->idprof2)
-		// ne correspond pas à l'entreprise du token OAuth (cf. en-tête fichier).
-		// On extrait le XML du PDF Factur-X, on remplace le SIREN, on envoie en CII.
-		// Tout le bloc ci-dessous est à supprimer quand Lemon aura son SIREN
-		// réel validé côté SUPER PDP.
 		$sandboxMode = (bool) getDolGlobalInt('LEMONSUPERPDP_SANDBOX_MODE');
 		$tmpXmlPath = null;
 		if ($sandboxMode) {
-			global $mysoc;
-			$fakeSiren = !empty($mysoc->idprof6) ? preg_replace('/[^0-9]/', '', $mysoc->idprof6) : '';
-			$realSiren = !empty($mysoc->idprof2) ? substr(preg_replace('/[^0-9]/', '', $mysoc->idprof2), 0, 9) : '';
-			if (empty($fakeSiren)) {
-				$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
-				$t->error_message = $langs->trans('LemonSuperPDPSandboxModeIdProf6Missing');
-				$t->update($user);
-				setEventMessages($t->error_message, null, 'errors');
-				$action = '';
-				return 0;
-			}
-			// Récupération du SIREN réel du destinataire pour le remplacer par
-			// celui de Tricatel sandbox (000000001). Sans ça, SUPER PDP refuse
-			// parce que l'annuaire sandbox ne connaît pas le SIREN du vrai client.
-			$realClientSiren = '';
-			if (empty($object->thirdparty)) {
-				$object->fetch_thirdparty();
-			}
-			if (!empty($object->thirdparty)) {
-				$clientSrc = !empty($object->thirdparty->idprof1) ? $object->thirdparty->idprof1 : $object->thirdparty->idprof2;
-				$realClientSiren = substr(preg_replace('/[^0-9]/', '', (string) $clientSrc), 0, 9);
-			}
-			$fakeClientSiren = '000000001';  // Tricatel sandbox SUPER PDP
-
 			try {
-				// On réutilise la lib atgp/factur-x déjà embarquée dans LemonFacturX
-				// (pas de dépendance composer dans LemonSuperPDP).
-				$facturxVendor = DOL_DOCUMENT_ROOT.'/custom/lemonfacturx/vendor/autoload.php';
-				if (!file_exists($facturxVendor)) {
-					throw new Exception('Autoload LemonFacturX introuvable : '.$facturxVendor);
-				}
-				require_once $facturxVendor;
-				$reader = new \Atgp\FacturX\Reader();
-				$pdfBinary = file_get_contents($pdfPath);
-				$xml = $reader->extractXML($pdfBinary, false);
-
-				// Substitutions ciblées : SIREN + numéro TVA intracommunautaire.
-				// Règle BR-FR-09 : la clé TVA doit être cohérente avec le SIREN,
-				// formule FR : clé = (12 + 3 × (SIREN mod 97)) mod 97.
-				// Sans swap du numéro TVA, SUPER PDP rejette la facture comme
-				// "Invalide" (incohérence entre SIREN et racine du VAT FR).
-				$calcVat = function ($siren) {
-					$s = (int) preg_replace('/[^0-9]/', '', $siren);
-					$key = ((12 + 3 * ($s % 97)) % 97);
-					return 'FR'.str_pad((string) $key, 2, '0', STR_PAD_LEFT).str_pad((string) $s, 9, '0', STR_PAD_LEFT);
-				};
-				$fakeVendorVat = $calcVat($fakeSiren);
-				$realVendorVat = !empty($mysoc->tva_intra) ? preg_replace('/\s+/', '', $mysoc->tva_intra) : '';
-				$fakeClientVat = $calcVat($fakeClientSiren);
-				$realClientVat = '';
-				if (!empty($object->thirdparty) && !empty($object->thirdparty->tva_intra)) {
-					$realClientVat = preg_replace('/\s+/', '', $object->thirdparty->tva_intra);
-				}
-
-				$search = array('>'.$realSiren.'<', '"'.$realSiren.'"');
-				$replace = array('>'.$fakeSiren.'<', '"'.$fakeSiren.'"');
-				if (strlen($realClientSiren) === 9 && $realClientSiren !== $realSiren) {
-					$search[] = '>'.$realClientSiren.'<';
-					$search[] = '"'.$realClientSiren.'"';
-					$replace[] = '>'.$fakeClientSiren.'<';
-					$replace[] = '"'.$fakeClientSiren.'"';
-				}
-				if (!empty($realVendorVat)) {
-					$search[] = '>'.$realVendorVat.'<';
-					$search[] = '"'.$realVendorVat.'"';
-					$replace[] = '>'.$fakeVendorVat.'<';
-					$replace[] = '"'.$fakeVendorVat.'"';
-				}
-				if (!empty($realClientVat) && $realClientVat !== $realVendorVat) {
-					$search[] = '>'.$realClientVat.'<';
-					$search[] = '"'.$realClientVat.'"';
-					$replace[] = '>'.$fakeClientVat.'<';
-					$replace[] = '"'.$fakeClientVat.'"';
-				}
-				$patched = str_replace($search, $replace, $xml);
-
-				$tmpXmlPath = tempnam(sys_get_temp_dir(), 'lemonspd_').'.xml';
-				file_put_contents($tmpXmlPath, $patched);
+				$patched = $this->applySandboxXmlPatch($facture, $pdfPath);
+				$tmpXmlPath = $patched['tmpPath'];
 				$fileToSend = $tmpXmlPath;
 				$formatSent = 'cii';
 				$t->format_sent = 'cii-sandbox';
-				dol_syslog('LemonSuperPDP [SANDBOX]: vendeur '.$realSiren.'->'.$fakeSiren.', client '.$realClientSiren.'->'.$fakeClientSiren.', envoi en CII', LOG_WARNING);
 			} catch (Exception $e) {
-				dol_syslog('LemonSuperPDP [SANDBOX]: échec extraction/patch XML : '.$e->getMessage(), LOG_ERR);
+				dol_syslog('LemonSuperPDP [SANDBOX]: '.$e->getMessage(), LOG_ERR);
 				$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
 				$t->error_message = 'Mode sandbox : '.$e->getMessage();
 				$t->update($user);
-				setEventMessages($t->error_message, null, 'errors');
-				$action = '';
-				return 0;
+				return array(
+					'outcome' => 'error',
+					'message' => $t->error_message,
+					'transmissionId' => (int) $t->id,
+				);
 			}
 		}
-		// >>> FIN SANDBOX MODE <<<
 
 		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+		$outcome = array('outcome' => 'error', 'message' => '', 'transmissionId' => (int) $t->id);
 		try {
 			$client = new SuperPDPClient($this->db);
 			$response = $client->submitInvoice($fileToSend, $formatSent);
@@ -644,56 +605,153 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			if (!empty($t->superpdp_id)) {
 				$msg .= ' — ID SUPER PDP : '.((int) $t->superpdp_id);
 			}
-			// >>> SANDBOX MODE <<<
 			if ($sandboxMode) {
 				$msg .= ' ('.$langs->trans('LemonSuperPDPSandboxModeSent').')';
 			}
-			// >>> FIN SANDBOX MODE <<<
-			setEventMessages($msg, null, 'mesgs');
+			$outcome = array('outcome' => 'ok', 'message' => $msg, 'transmissionId' => (int) $t->id);
 		} catch (SuperPDPException $e) {
-			dol_syslog('LemonSuperPDP: échec envoi facture '.$object->ref.' : '.$e->getMessage(), LOG_ERR);
+			dol_syslog('LemonSuperPDP: échec envoi facture '.$facture->ref.' : '.$e->getMessage(), LOG_ERR);
 			// Cas edge : SUPER PDP nous dit que la facture est déjà présente.
 			// Le message contient l'id de la facture existante (ex : "La facture
 			// est déjà existante (id 39519)"). On en profite pour recoller la
 			// transmission locale à la facture distante plutôt que rester en
 			// état Error (évite de créer une nouvelle facture côté SUPER PDP
 			// juste parce qu'on a réinitialisé en local).
-			$recovered = false;
 			if ($e->httpCode === 400 && preg_match('/id\s+(\d+)/', $e->getMessage(), $m)) {
 				$t->superpdp_id = (int) $m[1];
 				$t->status = LemonSuperPDPTransmission::STATUS_SENT;
 				$t->error_message = null;
 				$t->payload_response = json_encode(array('recovered' => true, 'source_message' => $e->getMessage()));
 				$t->update($user);
-				$recovered = true;
-				setEventMessages($langs->trans('LemonSuperPDPRecoveredExisting', (int) $t->superpdp_id), null, 'warnings');
-			}
-			if (!$recovered) {
+				$outcome = array(
+					'outcome' => 'ok-recovered',
+					'message' => $langs->trans('LemonSuperPDPRecoveredExisting', (int) $t->superpdp_id),
+					'transmissionId' => (int) $t->id,
+				);
+			} else {
 				$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
 				$t->error_message = $e->getMessage();
 				if ($e->responseBody) {
 					$t->payload_response = $e->responseBody;
 				}
 				$t->update($user);
-				setEventMessages($langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(), null, 'errors');
+				$outcome = array(
+					'outcome' => 'error',
+					'message' => $langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(),
+					'transmissionId' => (int) $t->id,
+				);
 			}
 		} catch (Exception $e) {
 			dol_syslog('LemonSuperPDP: exception envoi : '.$e->getMessage(), LOG_ERR);
 			$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
 			$t->error_message = $e->getMessage();
 			$t->update($user);
-			setEventMessages($langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(), null, 'errors');
+			$outcome = array(
+				'outcome' => 'error',
+				'message' => $langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(),
+				'transmissionId' => (int) $t->id,
+			);
 		}
 
-		// >>> SANDBOX MODE <<<
 		if ($tmpXmlPath !== null && file_exists($tmpXmlPath)) {
 			@unlink($tmpXmlPath);
 		}
-		// >>> FIN SANDBOX MODE <<<
 
-		$action = '';
-		return 0;
+		return $outcome;
 	}
+
+	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
+	/**
+	 * Extrait le XML Factur-X du PDF, remplace SIREN et numéro TVA émetteur/
+	 * destinataire par les valeurs sandbox et écrit le résultat dans un
+	 * fichier temporaire. Retourne {tmpPath, realSiren, fakeSiren}.
+	 *
+	 * Règle BR-FR-09 : la clé TVA doit être cohérente avec le SIREN, formule
+	 * FR : clé = (12 + 3 × (SIREN mod 97)) mod 97. Sans swap du numéro TVA,
+	 * SUPER PDP rejette la facture pour incohérence SIREN/VAT.
+	 *
+	 * @throws Exception
+	 */
+	private function applySandboxXmlPatch($facture, $pdfPath)
+	{
+		global $mysoc, $langs;
+
+		$fakeSiren = !empty($mysoc->idprof6) ? preg_replace('/[^0-9]/', '', $mysoc->idprof6) : '';
+		$realSiren = !empty($mysoc->idprof2) ? substr(preg_replace('/[^0-9]/', '', $mysoc->idprof2), 0, 9) : '';
+		if (empty($fakeSiren)) {
+			throw new Exception($langs->trans('LemonSuperPDPSandboxModeIdProf6Missing'));
+		}
+
+		$realClientSiren = '';
+		if (empty($facture->thirdparty)) {
+			$facture->fetch_thirdparty();
+		}
+		if (!empty($facture->thirdparty)) {
+			$clientSrc = !empty($facture->thirdparty->idprof1) ? $facture->thirdparty->idprof1 : $facture->thirdparty->idprof2;
+			$realClientSiren = substr(preg_replace('/[^0-9]/', '', (string) $clientSrc), 0, 9);
+		}
+		$fakeClientSiren = '000000001';  // Tricatel sandbox SUPER PDP
+
+		// On réutilise la lib atgp/factur-x déjà embarquée dans LemonFacturX
+		// (pas de dépendance composer dans LemonSuperPDP).
+		$facturxVendor = DOL_DOCUMENT_ROOT.'/custom/lemonfacturx/vendor/autoload.php';
+		if (!file_exists($facturxVendor)) {
+			throw new Exception('Autoload LemonFacturX introuvable : '.$facturxVendor);
+		}
+		require_once $facturxVendor;
+		$reader = new \Atgp\FacturX\Reader();
+		$pdfBinary = file_get_contents($pdfPath);
+		$xml = $reader->extractXML($pdfBinary, false);
+
+		$fakeVendorVat = self::computeFrVatNumber($fakeSiren);
+		$realVendorVat = !empty($mysoc->tva_intra) ? preg_replace('/\s+/', '', $mysoc->tva_intra) : '';
+		$fakeClientVat = self::computeFrVatNumber($fakeClientSiren);
+		$realClientVat = '';
+		if (!empty($facture->thirdparty) && !empty($facture->thirdparty->tva_intra)) {
+			$realClientVat = preg_replace('/\s+/', '', $facture->thirdparty->tva_intra);
+		}
+
+		$search = array('>'.$realSiren.'<', '"'.$realSiren.'"');
+		$replace = array('>'.$fakeSiren.'<', '"'.$fakeSiren.'"');
+		if (strlen($realClientSiren) === 9 && $realClientSiren !== $realSiren) {
+			$search[] = '>'.$realClientSiren.'<';
+			$search[] = '"'.$realClientSiren.'"';
+			$replace[] = '>'.$fakeClientSiren.'<';
+			$replace[] = '"'.$fakeClientSiren.'"';
+		}
+		if (!empty($realVendorVat)) {
+			$search[] = '>'.$realVendorVat.'<';
+			$search[] = '"'.$realVendorVat.'"';
+			$replace[] = '>'.$fakeVendorVat.'<';
+			$replace[] = '"'.$fakeVendorVat.'"';
+		}
+		if (!empty($realClientVat) && $realClientVat !== $realVendorVat) {
+			$search[] = '>'.$realClientVat.'<';
+			$search[] = '"'.$realClientVat.'"';
+			$replace[] = '>'.$fakeClientVat.'<';
+			$replace[] = '"'.$fakeClientVat.'"';
+		}
+		$patched = str_replace($search, $replace, $xml);
+
+		$tmpXmlPath = tempnam(sys_get_temp_dir(), 'lemonspd_').'.xml';
+		file_put_contents($tmpXmlPath, $patched);
+
+		dol_syslog('LemonSuperPDP [SANDBOX]: vendeur '.$realSiren.'->'.$fakeSiren.', client '.$realClientSiren.'->'.$fakeClientSiren.', envoi en CII', LOG_WARNING);
+
+		return array('tmpPath' => $tmpXmlPath, 'realSiren' => $realSiren, 'fakeSiren' => $fakeSiren);
+	}
+
+	/**
+	 * Calcule le numéro de TVA intracommunautaire FR à partir d'un SIREN.
+	 * Formule : clé = (12 + 3 × (SIREN mod 97)) mod 97.
+	 */
+	private static function computeFrVatNumber($siren)
+	{
+		$s = (int) preg_replace('/[^0-9]/', '', $siren);
+		$key = ((12 + 3 * ($s % 97)) % 97);
+		return 'FR'.str_pad((string) $key, 2, '0', STR_PAD_LEFT).str_pad((string) $s, 9, '0', STR_PAD_LEFT);
+	}
+	// >>> FIN SANDBOX MODE <<<
 
 	/**
 	 * Récupère les events SUPER PDP pour une facture donnée et les insère
@@ -716,9 +774,6 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 		$client = new SuperPDPClient($this->db);
 		$data = $client->getInvoice((int) $t->superpdp_id);
 
-		$nbInserted = 0;
-		$evObj = new LemonSuperPDPEvent($this->db);
-
 		// L'objet facture SUPER PDP contient un champ invoice_events étendu
 		// depuis l'API v1.9.0. Fallback : liste globale filtrée.
 		$events = array();
@@ -726,46 +781,21 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			$events = $data['invoice_events'];
 		}
 
-		foreach ($events as $ev) {
-			if (empty($ev['id']) || empty($ev['status_code'])) continue;
-			if ($evObj->existsBySuperpdpId((int) $ev['id'])) continue;
+		$result = LemonSuperPDPEvent::syncFromApiPayload($this->db, $events, $t->id, $facture->id, $user);
 
-			$inserted = LemonSuperPDPEvent::createAndLog($this->db, array(
-				'fk_transmission'   => $t->id,
-				'superpdp_event_id' => (int) $ev['id'],
-				'status_code'       => (string) $ev['status_code'],
-				'message'           => !empty($ev['message']) ? (string) $ev['message'] : null,
-				'direction'         => LemonSuperPDPEvent::DIRECTION_IN,
-				'event_date'        => !empty($ev['created_at']) ? strtotime($ev['created_at']) : dol_now(),
-				'payload_raw'       => json_encode($ev),
-			), $user, $facture->id);
-			if ($inserted > 0) {
-				$nbInserted++;
+		// Met à jour le statut de la transmission selon le dernier event connu
+		// (même si rien n'a été inséré : la plateforme peut nous redonner un
+		// état qui reflète mieux la réalité qu'une transmission figée).
+		if (!empty($result['lastStatusCode'])) {
+			$mapped = LemonSuperPDPTransmission::mapStatusFromEventCode($result['lastStatusCode']);
+			if ($mapped !== null) {
+				$t->status = $mapped;
 			}
+			$t->status_raw = $result['lastStatusCode'];
+			$t->update($user);
 		}
 
-		// Met à jour le statut de la transmission selon le dernier event connu.
-		if ($nbInserted > 0 || !empty($events)) {
-			$lastCode = '';
-			$lastTs = 0;
-			foreach ($events as $ev) {
-				$ts = !empty($ev['created_at']) ? strtotime($ev['created_at']) : 0;
-				if ($ts >= $lastTs) {
-					$lastTs = $ts;
-					$lastCode = $ev['status_code'];
-				}
-			}
-			if (!empty($lastCode)) {
-				$mapped = LemonSuperPDPTransmission::mapStatusFromEventCode($lastCode);
-				if ($mapped !== null) {
-					$t->status = $mapped;
-				}
-				$t->status_raw = $lastCode;
-				$t->update($user);
-			}
-		}
-
-		return $nbInserted;
+		return $result['inserted'];
 	}
 
 	/**
@@ -785,7 +815,8 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 		}
 
 		$details = array();
-		if ($statusCode === 'fr:212' || $statusCode === 'fr:207') {
+		if ($statusCode === LemonSuperPDPEvent::STATUS_ENCAISSEE
+			|| $statusCode === LemonSuperPDPEvent::STATUS_APPROUVEE_PARTIELLE) {
 			$amounts = LemonSuperPDPTransmission::buildAmountsByVatRate($facture, date('Y-m-d'));
 			$details = array(array('amounts' => $amounts));
 		}
@@ -803,7 +834,7 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			'payload_raw'       => json_encode($response),
 		), $user, $facture->id);
 
-		if ($statusCode === 'fr:212') {
+		if ($statusCode === LemonSuperPDPEvent::STATUS_ENCAISSEE) {
 			$t->status = LemonSuperPDPTransmission::STATUS_PAID;
 		}
 		$t->status_raw = $statusCode;

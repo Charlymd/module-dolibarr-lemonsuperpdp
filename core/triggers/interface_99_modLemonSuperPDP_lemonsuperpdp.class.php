@@ -40,9 +40,9 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 		if (!isModEnabled('lemonsuperpdp')) return 0;
 		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return 0;
 
-		// Seuls BILL_PAYED et PAYMENT_CUSTOMER_CREATE nous intéressent pour l'instant.
-		// BILL_PAYED : déclenché quand toutes les lignes de règlement couvrent le TTC
-		//              de la facture, après validation du paiement.
+		// BILL_PAYED : déclenché quand toutes les lignes de règlement couvrent
+		// le TTC de la facture, après validation du paiement. C'est le seul
+		// trigger qui nous intéresse pour émettre l'event fr:212 Encaissée.
 		if ($action !== 'BILL_PAYED') return 0;
 
 		if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
@@ -92,8 +92,11 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 		$sql .= " INNER JOIN ".MAIN_DB_PREFIX."paiement_facture pf ON pf.fk_paiement = p.rowid";
 		$sql .= " WHERE pf.fk_facture = ".((int) $facture->id);
 		$resql = $this->db->query($sql);
-		if ($resql && ($obj = $this->db->fetch_object($resql)) && !empty($obj->last_pay)) {
-			$paymentDate = date('Y-m-d', $this->db->jdate($obj->last_pay));
+		if ($resql) {
+			$obj = $this->db->fetch_object($resql);
+			if (!empty($obj) && !empty($obj->last_pay)) {
+				$paymentDate = date('Y-m-d', $this->db->jdate($obj->last_pay));
+			}
 			$this->db->free($resql);
 		}
 
@@ -101,14 +104,14 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 		$details = array(array('amounts' => $amounts));
 
 		$client = new SuperPDPClient($this->db);
-		$response = $client->submitEvent((int) $t->superpdp_id, 'fr:212', $details);
+		$response = $client->submitEvent((int) $t->superpdp_id, LemonSuperPDPEvent::STATUS_ENCAISSEE, $details);
 
 		// Enregistre l'event dans la table locale.
 		LemonSuperPDPEvent::createAndLog($this->db, array(
 			'fk_transmission'   => $t->id,
 			'superpdp_event_id' => !empty($response['id']) ? (int) $response['id'] : null,
-			'status_code'       => 'fr:212',
-			'message'           => 'Encaissée',
+			'status_code'       => LemonSuperPDPEvent::STATUS_ENCAISSEE,
+			'message'           => LemonSuperPDPEvent::getStatusLabel(LemonSuperPDPEvent::STATUS_ENCAISSEE),
 			'direction'         => LemonSuperPDPEvent::DIRECTION_OUT,
 			'event_date'        => dol_now(),
 			'payload_raw'       => json_encode($response),
@@ -116,9 +119,9 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 
 		// Met à jour le statut de la transmission.
 		$t->status = LemonSuperPDPTransmission::STATUS_PAID;
-		$t->status_raw = 'fr:212';
+		$t->status_raw = LemonSuperPDPEvent::STATUS_ENCAISSEE;
 		$t->update($user);
 
-		dol_syslog('LemonSuperPDP trigger: fr:212 envoyé pour facture '.$facture->ref.' (transmission '.$t->id.')', LOG_INFO);
+		dol_syslog('LemonSuperPDP trigger: '.LemonSuperPDPEvent::STATUS_ENCAISSEE.' envoyé pour facture '.$facture->ref.' (transmission '.$t->id.')', LOG_INFO);
 	}
 }
