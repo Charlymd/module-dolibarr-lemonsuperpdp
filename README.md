@@ -4,6 +4,8 @@ Module Dolibarr pour la transmission des factures électroniques via la **Platef
 
 Complément du module [LemonFacturX](https://github.com/hello-lemon/module-dolibarr-lemonfacturx) : là où LemonFacturX s'occupe du **format** (génération PDF/A-3 + XML EN16931 embarqué), LemonSuperPDP s'occupe du **transport** (envoi via l'API de la PA officielle DGFiP, synchronisation des statuts de cycle de vie).
 
+Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et communication à Clermont-Ferrand, spécialisée dans Dolibarr, WordPress et la facturation électronique.
+
 ## Statut
 
 Version 0.1.0 — en cours de développement. À ce stade :
@@ -86,4 +88,17 @@ Le module consomme l'API documentée ici : https://www.superpdp.tech/documentati
 
 ## Licence
 
-Distribué sous licence [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html) — Copyright (C) 2026 SASU LEMON.
+Distribué sous licence [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html) — Copyright (C) 2026 [SASU Lemon](https://hellolemon.fr).
+
+## À propos de Lemon
+
+[Lemon](https://hellolemon.fr) est une agence web et communication basée à Clermont-Ferrand, fondée en 2012. Nous accompagnons TPE, PME et indépendants bien au-delà du simple site web :
+
+- **Déploiement et hébergement Dolibarr** : installation, migration, paramétrage métier, formation de vos équipes
+- **Modules Dolibarr sur mesure** : CRM, pointeuse NFC, facturation électronique, intégrations API, automatisations — on développe le module qui manque à votre ERP
+- **Facturation électronique** : mise en conformité Factur-X EN16931, raccordement aux Plateformes Agréées (PA/PDP), accompagnement réforme 2026-2027
+- **IA au service des pros** : extraction automatique de factures fournisseurs, rapprochement bancaire, génération de contenus, assistants métier — on met l'IA au travail pour vous faire gagner du temps
+- **Sites web** : WordPress, Astro, Symfony — performance, SEO, éco-conception
+- **Communication & print** : identité visuelle, impression, fabrication (laser, 3D)
+
+Un projet Dolibarr, une idée d'automatisation, un besoin IA ? [Parlons-en](https://hellolemon.fr) — Clermont-Ferrand (63).
