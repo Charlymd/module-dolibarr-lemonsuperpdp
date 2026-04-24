@@ -310,6 +310,7 @@ print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc1Title").'</strong> : '
 print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc2Title").'</strong> : '.$langs->trans("LemonSuperPDPAboutSvc2Desc").'</li>';
 print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc3Title").'</strong> : '.$langs->trans("LemonSuperPDPAboutSvc3Desc").'</li>';
 print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc4Title").'</strong> : '.$langs->trans("LemonSuperPDPAboutSvc4Desc").'</li>';
+print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc5Title").'</strong> : '.$langs->trans("LemonSuperPDPAboutSvc5Desc").'</li>';
 print '</ul>';
 print '<p style="margin:0;">';
 print '<a href="https://hellolemon.fr" target="_blank" rel="noopener" class="butAction" style="text-decoration:none;">'.$langs->trans("LemonSuperPDPAboutCTA").'</a>';
