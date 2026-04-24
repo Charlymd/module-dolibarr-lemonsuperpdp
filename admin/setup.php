@@ -24,6 +24,7 @@ if (!$res) {
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+dol_include_once('/lemonsuperpdp/core/lib/lemonsuperpdp.lib.php');
 
 // Sécurité
 if (!$user->admin) {
@@ -134,6 +135,18 @@ llxHeader('', $langs->trans("LemonSuperPDPSetup"));
 
 $linkback = '<a href="'.DOL_URL_ROOT.'/admin/modules.php?restore_lastsearch_values=1">'.$langs->trans("BackToModuleList").'</a>';
 print load_fiche_titre($langs->trans("LemonSuperPDPSetup"), $linkback, 'title_setup');
+
+// Bandeau "Nouvelle version disponible" si le check GitHub remonte une version > locale
+require_once dirname(__DIR__).'/core/modules/modLemonSuperPDP.class.php';
+$modDesc = new modLemonSuperPDP($db);
+$updateInfo = lemonsuperpdp_check_latest_release($db, $modDesc->version);
+if ($updateInfo !== null) {
+	print '<div class="warning" style="margin:8px 0;padding:10px;border-left:4px solid #e67e22;background:#fff3e0;">';
+	print '<strong>'.$langs->trans("LemonSuperPDPUpdateAvailable").'</strong> : ';
+	print $langs->trans("LemonSuperPDPUpdateAvailableMsg", dol_escape_htmltag($updateInfo['version']), dol_escape_htmltag($modDesc->version));
+	print ' <a href="'.dol_escape_htmltag($updateInfo['url']).'" target="_blank" rel="noopener">'.$langs->trans("LemonSuperPDPUpdateSeeRelease").'</a>';
+	print '</div>';
+}
 
 print '<form method="POST" action="'.dol_escape_htmltag($_SERVER["PHP_SELF"]).'">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
@@ -287,6 +300,22 @@ if (empty($diagErrors)) {
 	print '<tr class="oddeven"><td colspan="2"><span style="color: green;"><strong>'.$langs->trans("LemonSuperPDPDiagAllOk").'</strong></span></td></tr>';
 }
 print '</table>';
+
+// Bloc "À propos de Lemon" — vitrine éditeur
+print '<div style="margin:30px 0;padding:20px 25px;border:1px solid #e0e0e0;border-left:4px solid #FFD21F;border-radius:6px;background:linear-gradient(135deg,#fffef7 0%,#fafafa 100%);">';
+print '<h3 style="margin:0 0 10px 0;color:#333;">'.$langs->trans("LemonSuperPDPAboutTitle").'</h3>';
+print '<p style="margin:0 0 12px 0;color:#555;">'.$langs->trans("LemonSuperPDPAboutIntro").'</p>';
+print '<ul style="margin:0 0 15px 20px;color:#555;">';
+print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc1Title").'</strong> : '.$langs->trans("LemonSuperPDPAboutSvc1Desc").'</li>';
+print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc2Title").'</strong> : '.$langs->trans("LemonSuperPDPAboutSvc2Desc").'</li>';
+print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc3Title").'</strong> : '.$langs->trans("LemonSuperPDPAboutSvc3Desc").'</li>';
+print '<li><strong>'.$langs->trans("LemonSuperPDPAboutSvc4Title").'</strong> : '.$langs->trans("LemonSuperPDPAboutSvc4Desc").'</li>';
+print '</ul>';
+print '<p style="margin:0;">';
+print '<a href="https://hellolemon.fr" target="_blank" rel="noopener" class="butAction" style="text-decoration:none;">'.$langs->trans("LemonSuperPDPAboutCTA").'</a>';
+print ' <span style="color:#999;margin-left:15px;">'.$langs->trans("LemonSuperPDPAboutLocation").'</span>';
+print '</p>';
+print '</div>';
 
 llxFooter();
 $db->close();

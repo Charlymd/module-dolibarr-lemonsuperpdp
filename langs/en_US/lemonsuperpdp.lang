@@ -1,12 +1,12 @@
 # Module LemonSuperPDP - English translations
 
-Module500240Name = LemonSuperPDP
-Module500240Desc = Invoice transmission through the SUPER PDP approved platform
+Module500270Name = LemonSuperPDP
+Module500270Desc = Invoice transmission through the SUPER PDP approved platform
 
 # Permissions
-Permission50024001 = Send an invoice through SUPER PDP
-Permission50024002 = View SUPER PDP transmissions
-Permission50024091 = Administer the LemonSuperPDP module
+Permission50027001 = Send an invoice through SUPER PDP
+Permission50027002 = View SUPER PDP transmissions
+Permission50027091 = Administer the LemonSuperPDP module
 
 # Setup
 LemonSuperPDPSetup = LemonSuperPDP configuration
@@ -87,3 +87,21 @@ LemonSuperPDPResetConfirm = Delete the transmission history for this invoice? Th
 LemonSuperPDPResetDone = Transmission reset (%s row(s) deleted)
 LemonSuperPDPResetError = Could not reset transmission
 # >>> END SANDBOX MODE <<<
+
+# Update and publisher showcase (Lemon standard)
+LemonSuperPDPUpdateAvailable = New version available
+LemonSuperPDPUpdateAvailableMsg = version %s is available on GitHub (installed version: %s).
+LemonSuperPDPUpdateSeeRelease = See release notes
+
+LemonSuperPDPAboutTitle = About Lemon
+LemonSuperPDPAboutIntro = Lemon is a web and communication agency based in Clermont-Ferrand, France. We develop this module for free for the Dolibarr community, and we also support companies on their full online presence.
+LemonSuperPDPAboutSvc1Title = Websites and applications
+LemonSuperPDPAboutSvc1Desc = showcase sites, e-commerce, custom business applications
+LemonSuperPDPAboutSvc2Title = Dolibarr experts
+LemonSuperPDPAboutSvc2Desc = custom modules, integrations, training and support
+LemonSuperPDPAboutSvc3Title = Communication and branding
+LemonSuperPDPAboutSvc3Desc = visual identity, strategy, print, social networks
+LemonSuperPDPAboutSvc4Title = Maker and fabrication
+LemonSuperPDPAboutSvc4Desc = 3D printing, laser cutting, prototyping, IoT
+LemonSuperPDPAboutCTA = Discover Lemon on hellolemon.fr
+LemonSuperPDPAboutLocation = Clermont-Ferrand, France - since 2012

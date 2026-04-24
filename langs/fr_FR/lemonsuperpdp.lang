@@ -1,12 +1,12 @@
 # Module LemonSuperPDP - Traductions françaises
 
-Module500240Name = LemonSuperPDP
-Module500240Desc = Transmission des factures via la Plateforme Agréée SUPER PDP
+Module500270Name = LemonSuperPDP
+Module500270Desc = Transmission des factures via la Plateforme Agréée SUPER PDP
 
 # Permissions
-Permission50024001 = Envoyer une facture via SUPER PDP
-Permission50024002 = Consulter les transmissions SUPER PDP
-Permission50024091 = Administrer le module LemonSuperPDP
+Permission50027001 = Envoyer une facture via SUPER PDP
+Permission50027002 = Consulter les transmissions SUPER PDP
+Permission50027091 = Administrer le module LemonSuperPDP
 
 # Setup - en-têtes
 LemonSuperPDPSetup = Configuration LemonSuperPDP
@@ -98,3 +98,21 @@ LemonSuperPDPResetConfirm = Supprimer l'historique de transmission pour cette fa
 LemonSuperPDPResetDone = Transmission réinitialisée (%s ligne(s) supprimée(s))
 LemonSuperPDPResetError = Impossible de réinitialiser la transmission
 # >>> FIN SANDBOX MODE <<<
+
+# Mise à jour et vitrine éditeur (standard Lemon)
+LemonSuperPDPUpdateAvailable = Nouvelle version disponible
+LemonSuperPDPUpdateAvailableMsg = la version %s est disponible sur GitHub (version installée : %s).
+LemonSuperPDPUpdateSeeRelease = Voir les notes de version
+
+LemonSuperPDPAboutTitle = À propos de Lemon
+LemonSuperPDPAboutIntro = Lemon est une agence web et communication à Clermont-Ferrand. Nous développons ce module gratuitement pour la communauté Dolibarr, et nous accompagnons aussi les entreprises sur l'ensemble de leur présence en ligne.
+LemonSuperPDPAboutSvc1Title = Sites web et applications
+LemonSuperPDPAboutSvc1Desc = sites vitrines, e-commerce, applications métier sur mesure
+LemonSuperPDPAboutSvc2Title = Dolibarr expert
+LemonSuperPDPAboutSvc2Desc = modules custom, intégrations, formation et support
+LemonSuperPDPAboutSvc3Title = Communication et branding
+LemonSuperPDPAboutSvc3Desc = identité visuelle, stratégie, print, réseaux sociaux
+LemonSuperPDPAboutSvc4Title = Fabrication et maker
+LemonSuperPDPAboutSvc4Desc = impression 3D, découpe laser, prototypage, objets connectés
+LemonSuperPDPAboutCTA = Découvrir Lemon sur hellolemon.fr
+LemonSuperPDPAboutLocation = Clermont-Ferrand, France - depuis 2012
