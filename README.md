@@ -8,20 +8,19 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Statut
 
-Version 0.1.0 — en cours de développement. À ce stade :
+Version 0.2.0 — phase pilote. À ce stade :
 
 - Descripteur du module et installation Dolibarr
 - Client HTTP OAuth 2.1 (client_credentials)
-- Page de configuration avec test de connexion
-- Traductions FR/EN
-
-À venir (roadmap) :
-
+- Page de configuration avec test de connexion et diagnostic
 - Bouton "Envoyer via SUPER PDP" sur la fiche facture
 - Envoi en masse depuis la liste des factures
-- Affichage des statuts (envoyée, acceptée, refusée, encaissée)
-- Cron de synchronisation des `invoice_events`
-- Envoi d'événements de cycle de vie depuis Dolibarr (statut encaissée à l'enregistrement d'un paiement)
+- Affichage des statuts de transmission (envoyée, acceptée, refusée, encaissée)
+- Cron de synchronisation des `invoice_events` (polling 15 min)
+- Trigger BILL_PAYED → envoi automatique du statut `fr:212`
+- Mode sandbox temporaire pour phase pilote (swap SIREN via idprof6)
+- Bandeau "nouvelle version disponible" + bloc À propos sur la page admin
+- Traductions FR/EN complètes
 
 ## Prérequis
 
@@ -49,7 +48,8 @@ chown -R www-data:www-data /var/www/html/custom/lemonsuperpdp
 
 ```
 lemonsuperpdp/
-├── core/modules/modLemonSuperPDP.class.php  # Descripteur (n° 500240)
+├── core/modules/modLemonSuperPDP.class.php  # Descripteur (n° 500270)
+├── core/lib/lemonsuperpdp.lib.php           # Lib utilitaire (update check GitHub)
 ├── class/superpdp_client.class.php          # Client HTTP OAuth 2.1
 ├── admin/setup.php                          # Configuration + test connexion
 ├── sql/
