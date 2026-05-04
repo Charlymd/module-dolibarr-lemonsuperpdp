@@ -111,7 +111,11 @@ if ($action == 'testconn') {
 		// Cohérence SIREN local (mysoc) ↔ SIREN de l'application OAuth SUPER PDP.
 		// Sans ce check, une instance Dolibarr déclarant un SIREN différent de celui
 		// lié à l'application OAuth émettrait des factures rejetées par la PA.
-		$remoteSiren = isset($testResult['siren']) ? preg_replace('/\D/', '', (string) $testResult['siren']) : '';
+		// L'API SUPER PDP renvoie le SIREN dans `number` quand `number_scheme === 'fr_siren'`.
+		$remoteSiren = '';
+		if (!empty($testResult['number']) && (($testResult['number_scheme'] ?? '') === 'fr_siren')) {
+			$remoteSiren = preg_replace('/\D/', '', (string) $testResult['number']);
+		}
 		$localSiren = preg_replace('/\D/', '', (string) ($mysoc->idprof1 ?? ''));
 
 		// Mémoriser le SIREN OAuth pour que le diagnostic puisse vérifier la cohérence
@@ -127,8 +131,8 @@ if ($action == 'testconn') {
 		if (!empty($testResult['formal_name'])) {
 			$details[] = $langs->trans("LemonSuperPDPCompanyName").' : '.dol_escape_htmltag($testResult['formal_name']);
 		}
-		if (!empty($testResult['siren'])) {
-			$details[] = 'SIREN : '.dol_escape_htmltag($testResult['siren']);
+		if ($remoteSiren !== '') {
+			$details[] = 'SIREN : '.dol_escape_htmltag($remoteSiren);
 		}
 
 		if ($sirenMismatch) {
@@ -323,11 +327,12 @@ if (!empty($mysoc->idprof2)) {
 }
 
 // Cohérence SIREN société ↔ SIREN de l'application OAuth SUPER PDP.
-// Le SIREN OAuth est mémorisé lors du dernier "Tester la connexion" réussi.
+// Le SIREN OAuth est mémorisé lors du dernier "Tester la connexion" réussi ;
+// le diagnostic ne déclenche pas d'appel API tout seul.
 $cachedOauthSiren = preg_replace('/\D/', '', (string) getDolGlobalString('LEMONSUPERPDP_OAUTH_SIREN', ''));
 $localSirenDiag = preg_replace('/\D/', '', (string) ($mysoc->idprof1 ?? ''));
 if ($cachedOauthSiren === '') {
-	$diagOk[] = $langs->trans("LemonSuperPDPDiagSirenCheckPending");
+	$diagErrors[] = $langs->trans("LemonSuperPDPDiagSirenNotTested");
 } elseif ($localSirenDiag === '') {
 	$diagErrors[] = $langs->trans("LemonSuperPDPDiagSirenLocalMissing", $cachedOauthSiren);
 } elseif ($localSirenDiag === $cachedOauthSiren) {

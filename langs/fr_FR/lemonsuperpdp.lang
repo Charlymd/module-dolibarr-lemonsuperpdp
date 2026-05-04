@@ -42,10 +42,10 @@ LemonSuperPDPDiagCredentialsMissing = Identifiants OAuth manquants (client_id et
 LemonSuperPDPEndpointMustBeHttps = L'endpoint SUPER PDP doit être en HTTPS (mitigation SSRF)
 LemonSuperPDPDiagSellerSIRET = SIRET de votre société
 LemonSuperPDPDiagSellerSIRETMissing = SIRET de votre société absent (Accueil > Setup > Société)
-LemonSuperPDPDiagSirenCheckPending = Cohérence du SIREN avec l'application OAuth : à valider via "Tester la connexion"
 LemonSuperPDPDiagSirenMatchOauth = SIREN de votre société cohérent avec l'application OAuth SUPER PDP (%s)
 LemonSuperPDPDiagSirenMismatchOauth = SIREN de votre société (%s) différent du SIREN de l'application OAuth SUPER PDP (%s). Les factures émises seront rejetées par la PA.
 LemonSuperPDPDiagSirenLocalMissing = SIREN de votre société absent. L'application OAuth SUPER PDP attend %s.
+LemonSuperPDPDiagSirenNotTested = Cohérence du SIREN avec l'application OAuth non vérifiée. Cliquez sur "Tester la connexion" pour valider.
 LemonSuperPDPDiagAllOk = Configuration complète, prête à l'emploi
 
 # Statuts de transmission
