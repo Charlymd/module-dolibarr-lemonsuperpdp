@@ -170,9 +170,22 @@ class ActionsLemonSuperPDP
 			if (!$user->hasRight('lemonsuperpdp', 'transmission', 'ecrire')) {
 				return 0;
 			}
+
+			// La facturation électronique B2B (réforme 2026-2027) ne concerne pas les
+			// factures aux particuliers : on bloque l'envoi avec un message explicite.
+			// fk_typent = 8 = Particulier dans la table llx_c_typent.
+			if (empty($object->thirdparty)) {
+				$object->fetch_thirdparty();
+			}
+			$isPrivateCustomer = (!empty($object->thirdparty) && (int) ($object->thirdparty->typent_id ?? 0) === 8);
+
 			$canSend = ((int) $object->statut) >= 1;
 			$url = $_SERVER['PHP_SELF'].'?action=dosendsuperpdp&id='.((int) $object->id).'&token='.newToken();
-			if ($canSend) {
+			if ($isPrivateCustomer) {
+				print '<span class="butActionRefused classfortooltip" title="'.dol_escape_htmltag($langs->trans('LemonSuperPDPSendInvoiceB2COnly')).'">';
+				print $langs->trans('LemonSuperPDPSendInvoice');
+				print '</span>';
+			} elseif ($canSend) {
 				print '<a class="butAction" href="'.dol_escape_htmltag($url).'" title="'.dol_escape_htmltag($langs->trans('LemonSuperPDPSendInvoiceTooltip')).'">';
 				print img_picto('', 'fa-paper-plane', 'class="fas paddingright pictofixedwidth"');
 				print $langs->trans('LemonSuperPDPSendInvoice');
@@ -508,6 +521,9 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			case 'skipped-already':
 				setEventMessages($langs->trans('LemonSuperPDPAlreadySent'), null, 'warnings');
 				break;
+			case 'skipped-b2c':
+				setEventMessages($msg, null, 'warnings');
+				break;
 			case 'skipped-draft':
 			case 'skipped-nopdf':
 			case 'skipped-create':
@@ -541,6 +557,16 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 
 		if (((int) $facture->statut) < 1) {
 			return array('outcome' => 'skipped-draft', 'message' => $langs->trans('LemonSuperPDPSendInvoiceDraft'));
+		}
+
+		// Bloque les factures B2C : la facturation électronique réformée ne s'applique
+		// qu'au B2B. Garde-fou serveur en plus du bouton grisé côté UI, pour résister
+		// à un POST forgé directement sur l'URL d'envoi.
+		if (empty($facture->thirdparty)) {
+			$facture->fetch_thirdparty();
+		}
+		if (!empty($facture->thirdparty) && (int) ($facture->thirdparty->typent_id ?? 0) === 8) {
+			return array('outcome' => 'skipped-b2c', 'message' => $langs->trans('LemonSuperPDPSendInvoiceB2COnly'));
 		}
 
 		dol_include_once('/lemonsuperpdp/class/transmission.class.php');

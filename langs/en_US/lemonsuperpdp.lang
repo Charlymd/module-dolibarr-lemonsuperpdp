@@ -54,6 +54,7 @@ LemonSuperPDPStatusError = Error
 LemonSuperPDPSendInvoice = Send via SUPER PDP
 LemonSuperPDPSendInvoiceTooltip = Transmit this invoice through the SUPER PDP approved platform
 LemonSuperPDPSendInvoiceDraft = The invoice must be validated before transmission
+LemonSuperPDPSendInvoiceB2COnly = The customer is a private individual. The B2B e-invoicing reform (2026-2027) only covers invoices between VAT-registered companies, not invoices to private individuals.
 LemonSuperPDPSendSelected = Send via SUPER PDP
 LemonSuperPDPBulkResult = Bulk send: %s succeeded, %s failed, %s skipped
 LemonSuperPDPRefreshStatus = Refresh status

@@ -60,6 +60,7 @@ LemonSuperPDPStatusError = Erreur
 LemonSuperPDPSendInvoice = Envoyer via SUPER PDP
 LemonSuperPDPSendInvoiceTooltip = Transmettre cette facture via la Plateforme Agréée SUPER PDP
 LemonSuperPDPSendInvoiceDraft = La facture doit être validée avant d'être transmise
+LemonSuperPDPSendInvoiceB2COnly = Le client est un particulier. La facturation électronique B2B (réforme 2026-2027) ne concerne que les factures entre assujettis TVA, pas les factures aux particuliers.
 LemonSuperPDPSendSelected = Envoyer via SUPER PDP
 LemonSuperPDPBulkResult = Envoi en masse : %s réussie(s), %s échec(s), %s ignorée(s)
 LemonSuperPDPRefreshStatus = Rafraîchir le statut
