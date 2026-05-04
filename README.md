@@ -31,18 +31,49 @@ Version 0.2.0 — phase pilote. À ce stade :
 
 ## Installation
 
-1. Copier le dossier dans le répertoire custom de Dolibarr :
+### 1. Déployer le module dans Dolibarr
 
 ```bash
 cp -r lemonsuperpdp/ /var/www/html/custom/
 chown -R www-data:www-data /var/www/html/custom/lemonsuperpdp
 ```
 
-2. Activer le module dans **Accueil > Configuration > Modules**
-3. Ouvrir la configuration du module et renseigner :
-   - `client_id` et `client_secret` de l'application SUPER PDP
-   - Format d'envoi (Factur-X par défaut)
-4. Cliquer sur **Tester la connexion** pour valider l'authentification OAuth
+Activer le module dans **Accueil > Configuration > Modules**.
+
+### 2. Créer une application OAuth sur SUPER PDP
+
+Avant de configurer le module, créez une application OAuth sur la plateforme SUPER PDP en production :
+
+1. Connectez-vous sur https://www.superpdp.tech/app
+2. **Applications > Nouvelle application**
+3. Remplissez le formulaire :
+
+| Champ | Valeur |
+|---|---|
+| **Entreprise** | Sélectionner votre entreprise |
+| **URLs de redirection** | *Laisser vide* — non utilisé en flow `client_credentials` |
+| **Type d'application** | **Confidentielle** — le module est PHP server-side, le `client_secret` est stocké côté serveur Dolibarr (jamais exposé au navigateur) |
+| **IBAN** | IBAN de votre entreprise (mandat SEPA, prélèvement des frais d'API selon la grille tarifaire SUPER PDP) |
+| **Souscription** | Cocher pour accepter la grille tarifaire et signer le mandat SEPA |
+
+4. Cliquer sur **Créer**. Le `client_id` et le `client_secret` s'affichent. **⚠️ Le `client_secret` n'est affiché qu'une seule fois** — copiez-le immédiatement.
+
+### 3. Configurer le module dans Dolibarr
+
+Ouvrir **Accueil > Configuration > Modules > LemonSuperPDP > Configurer** et renseigner :
+
+| Champ | Valeur |
+|---|---|
+| **URL de l'API** | `https://api.superpdp.tech` (production et bac à sable utilisent le même endpoint) |
+| **Identifiant OAuth (client_id)** | Le `client_id` de l'application créée à l'étape 2 |
+| **Secret OAuth (client_secret)** | Le `client_secret` de l'application créée à l'étape 2 |
+| **Format d'envoi** | `Factur-X` (recommandé — utilise le PDF/A-3 généré par LemonFacturX) |
+
+Cliquer sur **Tester la connexion** pour valider l'authentification OAuth. Si le test réussit, le module est prêt à transmettre des factures.
+
+### 4. (Optionnel) Activer le cron de synchronisation
+
+Pour la remontée automatique des statuts (acceptée, refusée, encaissée), activer le cron `scripts/cron_sync_events.php` toutes les 15 minutes via le planificateur Dolibarr ou cron système.
 
 ## Architecture
 
