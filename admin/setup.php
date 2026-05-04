@@ -113,6 +113,12 @@ if ($action == 'testconn') {
 		// lié à l'application OAuth émettrait des factures rejetées par la PA.
 		$remoteSiren = isset($testResult['siren']) ? preg_replace('/\D/', '', (string) $testResult['siren']) : '';
 		$localSiren = preg_replace('/\D/', '', (string) ($mysoc->idprof1 ?? ''));
+
+		// Mémoriser le SIREN OAuth pour que le diagnostic puisse vérifier la cohérence
+		// sans refaire d'appel API à chaque chargement.
+		if ($remoteSiren !== '') {
+			dolibarr_set_const($db, 'LEMONSUPERPDP_OAUTH_SIREN', $remoteSiren, 'chaine', 0, '', 0);
+		}
 		$sirenMatches = ($remoteSiren !== '' && $localSiren !== '' && $remoteSiren === $localSiren);
 		$sirenMismatch = ($remoteSiren !== '' && $localSiren !== '' && $remoteSiren !== $localSiren);
 		$sirenLocalMissing = ($remoteSiren !== '' && $localSiren === '');
@@ -314,6 +320,20 @@ if (!empty($mysoc->idprof2)) {
 	$diagOk[] = $langs->trans("LemonSuperPDPDiagSellerSIRET").' : '.dol_escape_htmltag($mysoc->idprof2);
 } else {
 	$diagErrors[] = $langs->trans("LemonSuperPDPDiagSellerSIRETMissing");
+}
+
+// Cohérence SIREN société ↔ SIREN de l'application OAuth SUPER PDP.
+// Le SIREN OAuth est mémorisé lors du dernier "Tester la connexion" réussi.
+$cachedOauthSiren = preg_replace('/\D/', '', (string) getDolGlobalString('LEMONSUPERPDP_OAUTH_SIREN', ''));
+$localSirenDiag = preg_replace('/\D/', '', (string) ($mysoc->idprof1 ?? ''));
+if ($cachedOauthSiren === '') {
+	$diagOk[] = $langs->trans("LemonSuperPDPDiagSirenCheckPending");
+} elseif ($localSirenDiag === '') {
+	$diagErrors[] = $langs->trans("LemonSuperPDPDiagSirenLocalMissing", $cachedOauthSiren);
+} elseif ($localSirenDiag === $cachedOauthSiren) {
+	$diagOk[] = $langs->trans("LemonSuperPDPDiagSirenMatchOauth", $cachedOauthSiren);
+} else {
+	$diagErrors[] = $langs->trans("LemonSuperPDPDiagSirenMismatchOauth", $localSirenDiag, $cachedOauthSiren);
 }
 
 print '<table class="noborder centpercent">';
