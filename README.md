@@ -48,7 +48,7 @@ chown -R www-data:www-data /var/www/html/custom/lemonsuperpdp
 
 ```
 lemonsuperpdp/
-├── core/modules/modLemonSuperPDP.class.php  # Descripteur (n° 500270)
+├── core/modules/modLemonSuperPDP.class.php  # Descripteur (n° 210009)
 ├── core/lib/lemonsuperpdp.lib.php           # Lib utilitaire (update check GitHub)
 ├── class/superpdp_client.class.php          # Client HTTP OAuth 2.1
 ├── admin/setup.php                          # Configuration + test connexion

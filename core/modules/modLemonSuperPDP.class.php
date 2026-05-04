@@ -20,7 +20,7 @@ class modLemonSuperPDP extends DolibarrModules
 		global $conf;
 
 		$this->db = $db;
-		$this->numero = 500270;
+		$this->numero = 210009;
 		$this->rights_class = 'lemonsuperpdp';
 		$this->family = "financial";
 		$this->module_position = '91';

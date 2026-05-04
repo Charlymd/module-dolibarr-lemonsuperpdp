@@ -1,12 +1,12 @@
 # Module LemonSuperPDP - Traductions françaises
 
-Module500270Name = LemonSuperPDP
-Module500270Desc = Transmission des factures via la Plateforme Agréée SUPER PDP
+Module210009Name = LemonSuperPDP
+Module210009Desc = Transmission des factures via la Plateforme Agréée SUPER PDP
 
 # Permissions
-Permission50027001 = Envoyer une facture via SUPER PDP
-Permission50027002 = Consulter les transmissions SUPER PDP
-Permission50027091 = Administrer le module LemonSuperPDP
+Permission21000901 = Envoyer une facture via SUPER PDP
+Permission21000902 = Consulter les transmissions SUPER PDP
+Permission21000991 = Administrer le module LemonSuperPDP
 
 # Setup - en-têtes
 LemonSuperPDPSetup = Configuration LemonSuperPDP

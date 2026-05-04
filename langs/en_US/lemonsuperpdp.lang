@@ -1,12 +1,12 @@
 # Module LemonSuperPDP - English translations
 
-Module500270Name = LemonSuperPDP
-Module500270Desc = Invoice transmission through the SUPER PDP approved platform
+Module210009Name = LemonSuperPDP
+Module210009Desc = Invoice transmission through the SUPER PDP approved platform
 
 # Permissions
-Permission50027001 = Send an invoice through SUPER PDP
-Permission50027002 = View SUPER PDP transmissions
-Permission50027091 = Administer the LemonSuperPDP module
+Permission21000901 = Send an invoice through SUPER PDP
+Permission21000902 = View SUPER PDP transmissions
+Permission21000991 = Administer the LemonSuperPDP module
 
 # Setup
 LemonSuperPDPSetup = LemonSuperPDP configuration
