@@ -23,6 +23,9 @@ LemonSuperPDPFormatHelp = Factur-X recommended: uses the human-readable PDF gene
 LemonSuperPDPTestConnection = Test connection
 LemonSuperPDPTestSuccess = SUPER PDP connection successful
 LemonSuperPDPTestError = SUPER PDP connection failed
+LemonSuperPDPTestSirenMatch = SIREN matches your company
+LemonSuperPDPTestSirenMismatch = Connection established, but your Dolibarr company SIREN (%s) does not match the SIREN of the SUPER PDP OAuth application (%s). Invoices will be rejected by the Approved Platform. Update the SIREN in Home > Setup > Company, or create an OAuth application for the correct company on SUPER PDP.
+LemonSuperPDPTestSirenLocalMissing = Connection established with OAuth application (SIREN %s), but no SIREN is set in Dolibarr (Home > Setup > Company). Invoices will be rejected by the Approved Platform until this field is filled in.
 LemonSuperPDPCompanyName = Legal name
 LemonSuperPDPInfo = LemonSuperPDP uses the <a href="https://www.superpdp.tech" target="_blank" rel="noopener">SUPER PDP</a> API to transmit your customer invoices through the Approved Platform. OAuth credentials must be created in your SUPER PDP account, under <a href="https://www.superpdp.tech/app" target="_blank" rel="noopener">Applications</a>.
 

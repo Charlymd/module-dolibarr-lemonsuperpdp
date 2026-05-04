@@ -107,7 +107,16 @@ if ($action == 'testconn') {
 	try {
 		$client = new SuperPDPClient($db);
 		$testResult = $client->testConnection();
-		$msg = $langs->trans("LemonSuperPDPTestSuccess");
+
+		// Cohérence SIREN local (mysoc) ↔ SIREN de l'application OAuth SUPER PDP.
+		// Sans ce check, une instance Dolibarr déclarant un SIREN différent de celui
+		// lié à l'application OAuth émettrait des factures rejetées par la PA.
+		$remoteSiren = isset($testResult['siren']) ? preg_replace('/\D/', '', (string) $testResult['siren']) : '';
+		$localSiren = preg_replace('/\D/', '', (string) ($mysoc->idprof1 ?? ''));
+		$sirenMatches = ($remoteSiren !== '' && $localSiren !== '' && $remoteSiren === $localSiren);
+		$sirenMismatch = ($remoteSiren !== '' && $localSiren !== '' && $remoteSiren !== $localSiren);
+		$sirenLocalMissing = ($remoteSiren !== '' && $localSiren === '');
+
 		$details = array();
 		if (!empty($testResult['formal_name'])) {
 			$details[] = $langs->trans("LemonSuperPDPCompanyName").' : '.dol_escape_htmltag($testResult['formal_name']);
@@ -115,10 +124,29 @@ if ($action == 'testconn') {
 		if (!empty($testResult['siren'])) {
 			$details[] = 'SIREN : '.dol_escape_htmltag($testResult['siren']);
 		}
-		if (!empty($details)) {
-			$msg .= ' — '.implode(' — ', $details);
+
+		if ($sirenMismatch) {
+			$err = $langs->trans("LemonSuperPDPTestSirenMismatch", $localSiren, $remoteSiren);
+			if (!empty($details)) {
+				$err .= ' — '.implode(' — ', $details);
+			}
+			setEventMessages($err, null, 'errors');
+		} elseif ($sirenLocalMissing) {
+			$warn = $langs->trans("LemonSuperPDPTestSirenLocalMissing", $remoteSiren);
+			if (!empty($details)) {
+				$warn .= ' — '.implode(' — ', $details);
+			}
+			setEventMessages($warn, null, 'warnings');
+		} else {
+			$msg = $langs->trans("LemonSuperPDPTestSuccess");
+			if ($sirenMatches) {
+				$details[] = $langs->trans("LemonSuperPDPTestSirenMatch");
+			}
+			if (!empty($details)) {
+				$msg .= ' — '.implode(' — ', $details);
+			}
+			setEventMessages($msg, null, 'mesgs');
 		}
-		setEventMessages($msg, null, 'mesgs');
 	} catch (SuperPDPException $e) {
 		$err = $langs->trans("LemonSuperPDPTestError").' — '.$e->getMessage();
 		if ($e->responseBody) {

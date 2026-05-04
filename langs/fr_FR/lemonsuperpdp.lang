@@ -26,6 +26,9 @@ LemonSuperPDPFormatHelp = Factur-X recommandé : vous bénéficiez ainsi du PDF 
 LemonSuperPDPTestConnection = Tester la connexion
 LemonSuperPDPTestSuccess = Connexion SUPER PDP réussie
 LemonSuperPDPTestError = Échec de la connexion SUPER PDP
+LemonSuperPDPTestSirenMatch = SIREN cohérent avec votre société
+LemonSuperPDPTestSirenMismatch = Connexion établie, mais le SIREN de votre société Dolibarr (%s) ne correspond pas au SIREN de l'application OAuth SUPER PDP (%s). Les factures émises seront rejetées par la PA. Corrigez le SIREN dans Accueil > Setup > Société, ou créez une application OAuth pour la bonne entreprise sur SUPER PDP.
+LemonSuperPDPTestSirenLocalMissing = Connexion établie avec l'application OAuth (SIREN %s), mais aucun SIREN n'est renseigné côté Dolibarr (Accueil > Setup > Société). Les factures émises seront rejetées par la PA tant que ce champ n'est pas rempli.
 LemonSuperPDPCompanyName = Dénomination sociale
 LemonSuperPDPInfo = LemonSuperPDP utilise l'API <a href="https://www.superpdp.tech" target="_blank" rel="noopener">SUPER PDP</a> pour transmettre vos factures clients via la Plateforme Agréée. Les identifiants OAuth sont à créer dans votre compte SUPER PDP, section <a href="https://www.superpdp.tech/app" target="_blank" rel="noopener">Applications</a>.
 
