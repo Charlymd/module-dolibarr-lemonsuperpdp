@@ -27,7 +27,7 @@ class modLemonSuperPDP extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = "Transmission des factures via la Plateforme Agréée SUPER PDP";
 		$this->descriptionlong = "Envoie les factures clients Factur-X (générées par LemonFacturX) via l'API de la Plateforme Agréée SUPER PDP, et synchronise les statuts de cycle de vie (déposée, acceptée, refusée, encaissée).";
-		$this->version = '0.2.1';
+		$this->version = '0.3.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'bill';
 		$this->editor_name = 'Lemon';
