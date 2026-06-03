@@ -1,0 +1,40 @@
+name: Build release ZIP
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-zip:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag (strip leading 'v')
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build clean ZIP (dossier racine = lemonsuperpdp/)
+        run: |
+          mkdir -p /tmp/build/lemonsuperpdp
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitignore' \
+            --exclude='.gitattributes' \
+            --exclude='*.md.bak' \
+            --exclude='/tests' \
+            --exclude='/demo' \
+            ./ /tmp/build/lemonsuperpdp/
+          cd /tmp/build && zip -r "/tmp/module_lemonsuperpdp-${{ steps.version.outputs.VERSION }}.zip" lemonsuperpdp/
+          unzip -l "/tmp/module_lemonsuperpdp-${{ steps.version.outputs.VERSION }}.zip" | head -20
+
+      - name: Attach ZIP to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: /tmp/module_lemonsuperpdp-*.zip
+          fail_on_unmatched_files: true
