@@ -8,9 +8,13 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Statut
 
-Version 0.4.0 — phase pilote SUPER PDP. Fonctionnalités :
+Version 1.0.0 — phase pilote SUPER PDP. Fonctionnalités :
 
-- **Réception des factures fournisseurs** (nouveau) : polling de l'API (`direction=in`), rattachement automatique du tiers par SIREN/SIRET, création de la facture fournisseur Dolibarr **en brouillon** (jamais auto-validée) avec lignes, remises/frais de pied de document et fichier original (PDF Factur-X ou XML) attaché ; écran « Factur-X reçues » avec quarantaine pour les tiers introuvables ou ambigus et les devises étrangères
+- **Réception des factures fournisseurs** : polling de l'API (`direction=in`), rattachement automatique du tiers par SIREN/SIRET, création de la facture fournisseur Dolibarr **en brouillon** (jamais auto-validée) avec lignes, remises/frais de pied de document et fichier original (PDF Factur-X ou XML) attaché ; écran « Factur-X reçues » avec quarantaine pour les tiers introuvables ou ambigus et les devises étrangères
+- **Import manuel** d'un fichier Factur-X (PDF) ou XML (CII/UBL) reçu hors plateforme (par mail pendant la transition) : conversion par l'API SUPER PDP, même pipeline que le polling
+- **Cycle de vie côté acheteur** : Approuver (fr:206) / Refuser (fr:210) depuis l'écran des factures reçues, et fr:209 (Paiement transmis) envoyé automatiquement au paiement de la facture fournisseur
+- **Pre-check annuaire** : avant chaque envoi, vérification que le destinataire a une adresse électronique active dans l'annuaire des Plateformes Agréées, avec un message clair sinon (au lieu du rejet cryptique de la plateforme)
+- **E-reporting B2C** : à la validation et au paiement des factures clients « Particulier », mise en file des données de transactions (codes Z12-012 TLB1/TPS1/TNT1, ventilation par taux de TVA) et de paiements, transmises par lots à SUPER PDP qui agrège et déclare au PPF ; écran de suivi de la file avec relance des refusées
 
 - Authentification OAuth 2.1 `client_credentials` avec rafraîchissement automatique du token
 - Page de configuration avec test de connexion et diagnostic complet
@@ -140,7 +144,22 @@ Le statut `fr:212` (encaissée) est également envoyé automatiquement par le tr
 3. L'écran **Facturation > Factures fournisseurs > Factur-X reçues (SUPER PDP)** liste tout : bouton **Synchroniser maintenant**, choix du tiers et import pour les quarantaines, écarter/réintégrer une facture
 4. La facture importée reste un **brouillon** : vérification humaine puis validation dans Dolibarr, comme une saisie manuelle
 
-> **Mise à jour depuis une version < 0.4.0** : désactiver puis réactiver le module pour créer la table `llx_lemonsuperpdp_reception`, les nouvelles permissions, l'entrée de menu et la tâche planifiée. La désactivation ne supprime aucune donnée.
+> **Mise à jour depuis une version < 1.0.0** : désactiver puis réactiver le module pour créer les tables `llx_lemonsuperpdp_reception` et `llx_lemonsuperpdp_ereporting`, les nouvelles permissions, les entrées de menu et les tâches planifiées. La désactivation ne supprime aucune donnée.
+
+### Approuver, refuser, déclarer payée une facture reçue
+
+Sur l'écran **Factur-X reçues**, chaque facture importée depuis la plateforme propose **Approuver** (fr:206) et **Refuser** (fr:210) — le fournisseur voit le statut remonter chez lui. Au paiement de la facture fournisseur dans Dolibarr, le module envoie automatiquement **fr:209 Paiement transmis**. Les statuts émis sont tracés dans l'agenda de la facture fournisseur.
+
+Les imports manuels (fichier reçu par mail) n'ont pas d'identifiant plateforme : aucun statut n'est transmissible pour eux, c'est normal.
+
+### E-reporting B2C
+
+1. Activer **E-reporting B2C** dans la configuration du module (désactivé par défaut)
+2. À la **validation** d'une facture client dont le tiers est de type « Particulier », le module met en file les données de transaction (une déclaration par catégorie Z12-012 : TLB1 biens, TPS1 services, TNT1 non taxé, ventilées par taux de TVA). Au **paiement**, il met en file la déclaration de paiement (sous-totaux TTC)
+3. La tâche planifiée **Envoi e-reporting B2C SUPER PDP** (15 minutes) pousse la file par lots ; SUPER PDP agrège et transmet au PPF selon le régime de TVA configuré au niveau du compte
+4. L'écran **Facturation > Factures clients > E-reporting B2C (SUPER PDP)** affiche la file : en attente, transmises, refusées (relançables après correction)
+
+Les déclarations refusées par l'API (erreur 4xx) passent en « Refusée » et n'empêchent pas le reste de la file ; les erreurs réseau restent « En attente » et sont retentées à la passe suivante.
 
 ## Diagnostic et dépannage
 
@@ -223,6 +242,8 @@ Le module consomme l'API documentée ici : https://www.superpdp.tech/documentati
 | `LEMONSUPERPDP_LAST_EVENT_ID` | string | `0` | Dernier `invoice_event` synchronisé (pagination cron) |
 | `LEMONSUPERPDP_IN_ENABLED` | int | 0 | Activer la réception des factures fournisseurs (`direction=in`) |
 | `LEMONSUPERPDP_LAST_IN_ID` | string | `0` | Dernière facture reçue synchronisée (curseur de polling) |
+| `LEMONSUPERPDP_EREPORTING_ENABLED` | int | 0 | Activer l'e-reporting B2C (transactions + paiements des factures aux particuliers) |
+| `LEMONSUPERPDP_PRECHECK_DIRECTORY` | int | 1 | Vérifier l'annuaire des Plateformes Agréées avant chaque envoi |
 | `LEMONSUPERPDP_OAUTH_SIREN` | string | (vide) | SIREN de l'application OAuth, mémorisé au dernier "Tester la connexion" réussi pour la cohérence du diagnostic |
 | `LEMONSUPERPDP_OAUTH_SIREN_AT` | string | `0` | Timestamp du dernier rafraîchissement de `LEMONSUPERPDP_OAUTH_SIREN` |
 | `LEMONSUPERPDP_SANDBOX_MODE` | int | 0 | Mode sandbox phase pilote : remplace le SIREN émetteur par `idprof6` avant envoi (à désactiver en prod) |

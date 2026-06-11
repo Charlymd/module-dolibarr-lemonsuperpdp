@@ -27,6 +27,7 @@ require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
 require_once DOL_DOCUMENT_ROOT.'/societe/class/societe.class.php';
 dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
 dol_include_once('/lemonsuperpdp/class/reception.class.php');
+dol_include_once('/lemonsuperpdp/class/event.class.php');
 
 $langs->loadLangs(array('bills', 'companies', 'lemonsuperpdp@lemonsuperpdp'));
 
@@ -91,6 +92,38 @@ if ($action == 'sync' && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')
 	$action = '';
 }
 
+// Import manuel d'un fichier Factur-X (PDF) ou XML (CII/UBL) : conversion via la PA
+if ($action == 'uploadmanual' && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
+	if (GETPOST('token', 'alpha') != newToken()) {
+		accessforbidden('Bad value for CSRF token');
+	}
+	if (empty($_FILES['facturxfile']['tmp_name']) || !is_uploaded_file($_FILES['facturxfile']['tmp_name'])) {
+		setEventMessages($langs->trans('ErrorFieldRequired', $langs->trans('File')), null, 'errors');
+	} else {
+		$ext = strtolower(pathinfo((string) $_FILES['facturxfile']['name'], PATHINFO_EXTENSION));
+		if (!in_array($ext, array('pdf', 'xml'), true)) {
+			setEventMessages($langs->trans('LemonSuperPDPRecUploadBadExt'), null, 'errors');
+		} elseif ((int) $_FILES['facturxfile']['size'] > 10485760) {
+			setEventMessages($langs->trans('ErrorFileSizeTooLarge'), null, 'errors');
+		} else {
+			$content = file_get_contents($_FILES['facturxfile']['tmp_name']);
+			try {
+				$rec = LemonSuperPDPReception::createFromManualUpload($db, $user, $content);
+				if ($rec->status === LemonSuperPDPReception::STATUS_IMPORTED) {
+					setEventMessages($langs->trans('LemonSuperPDPRecImported'), null, 'mesgs');
+				} elseif ($rec->status === LemonSuperPDPReception::STATUS_QUARANTINE) {
+					setEventMessages($langs->trans('LemonSuperPDPRecUploadQuarantined').($rec->error_message ? ' : '.$rec->error_message : ''), null, 'warnings');
+				} else {
+					setEventMessages($langs->trans('LemonSuperPDPRecImportFailed').($rec->error_message ? ' : '.$rec->error_message : ''), null, 'errors');
+				}
+			} catch (Exception $e) {
+				setEventMessages($langs->trans('LemonSuperPDPRecImportFailed').' : '.$e->getMessage(), null, 'errors');
+			}
+		}
+	}
+	$action = '';
+}
+
 // Import d'une réception (quarantaine/erreur) avec tiers choisi ou résolu
 if ($action == 'import' && $id > 0 && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
 	if (GETPOST('token', 'alpha') != newToken()) {
@@ -99,11 +132,32 @@ if ($action == 'import' && $id > 0 && $user->hasRight('lemonsuperpdp', 'receptio
 	$rec = new LemonSuperPDPReception($db);
 	if ($rec->fetch($id) > 0 && !in_array($rec->status, array(LemonSuperPDPReception::STATUS_IMPORTED), true)) {
 		$socid = GETPOSTINT('socid');
-		$ret = $rec->importAsSupplierInvoice($user, null, $socid);
+		// Import manuel mis en quarantaine : le fichier original est conservé
+		// dans le payload, on le réutilise pour l'attache.
+		$localContent = ($rec->source === LemonSuperPDPReception::SOURCE_MANUAL) ? $rec->getStoredOriginalFileContent() : null;
+		$ret = $rec->importAsSupplierInvoice($user, null, $socid, $localContent);
 		if ($ret > 0) {
 			setEventMessages($langs->trans('LemonSuperPDPRecImported'), null, 'mesgs');
 		} else {
 			setEventMessages($langs->trans('LemonSuperPDPRecImportFailed').($rec->error_message ? ' : '.$rec->error_message : ''), null, 'errors');
+		}
+	}
+	$action = '';
+}
+
+// Cycle de vie acheteur : approuver (fr:206) ou refuser (fr:210) une facture reçue
+if (($action == 'accept' || $action == 'refuse') && $id > 0 && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
+	if (GETPOST('token', 'alpha') != newToken()) {
+		accessforbidden('Bad value for CSRF token');
+	}
+	dol_include_once('/lemonsuperpdp/class/event.class.php');
+	$rec = new LemonSuperPDPReception($db);
+	if ($rec->fetch($id) > 0 && $rec->status === LemonSuperPDPReception::STATUS_IMPORTED) {
+		$code = ($action == 'accept') ? LemonSuperPDPEvent::STATUS_APPROUVEE : LemonSuperPDPEvent::STATUS_REFUSEE;
+		if ($rec->sendLifecycleEvent($user, $code) > 0) {
+			setEventMessages($langs->trans('LemonSuperPDPRecLifecycleSent', $code), null, 'mesgs');
+		} else {
+			setEventMessages($rec->error, null, 'errors');
 		}
 	}
 	$action = '';
@@ -128,9 +182,9 @@ if (($action == 'ignore' || $action == 'unignore') && $id > 0 && $user->hasRight
 
 llxHeader('', $langs->trans('LemonSuperPDPRecListTitle'));
 
-$sql = "SELECT r.rowid, r.superpdp_id, r.fk_facture_fourn, r.fk_soc, r.supplier_name, r.supplier_siren,";
+$sql = "SELECT r.rowid, r.superpdp_id, r.source, r.fk_facture_fourn, r.fk_soc, r.supplier_name, r.supplier_siren,";
 $sql .= " r.invoice_number, r.invoice_type_code, r.invoice_date, r.total_ht, r.total_ttc, r.currency_code,";
-$sql .= " r.status, r.error_message, r.date_fetched, r.date_imported,";
+$sql .= " r.status, r.lifecycle_status, r.error_message, r.date_fetched, r.date_imported,";
 $sql .= " s.nom as soc_name, ff.ref as ff_ref, ff.fk_statut as ff_status";
 $sql .= " FROM ".MAIN_DB_PREFIX."lemonsuperpdp_reception r";
 $sql .= " LEFT JOIN ".MAIN_DB_PREFIX."societe s ON s.rowid = r.fk_soc";
@@ -200,6 +254,24 @@ if (!getDolGlobalInt('LEMONSUPERPDP_IN_ENABLED')) {
 	print '<div class="warning">'.$langs->trans('LemonSuperPDPRecDisabledHint').'</div>';
 }
 
+print '</form>';
+
+// Import manuel : formulaire séparé (multipart), hors du formulaire de filtres.
+if ($user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
+	print '<form method="POST" action="'.$_SERVER["PHP_SELF"].'" enctype="multipart/form-data" class="inline-block" style="margin-bottom:10px;">';
+	print '<input type="hidden" name="token" value="'.newToken().'">';
+	print '<input type="hidden" name="action" value="uploadmanual">';
+	print '<span class="opacitymedium">'.$langs->trans('LemonSuperPDPRecUploadLabel').'</span> ';
+	print '<input type="file" name="facturxfile" accept=".pdf,.xml" class="flat"> ';
+	print '<input type="submit" class="button button-save small" value="'.dol_escape_htmltag($langs->trans('LemonSuperPDPRecUploadSubmit')).'">';
+	print '</form>';
+}
+
+print '<form method="POST" action="'.$_SERVER["PHP_SELF"].'" name="formfilter2">';
+print '<input type="hidden" name="token" value="'.newToken().'">';
+print '<input type="hidden" name="sortfield" value="'.dol_escape_htmltag($sortfield).'">';
+print '<input type="hidden" name="sortorder" value="'.dol_escape_htmltag($sortorder).'">';
+
 $statusChoices = array(
 	LemonSuperPDPReception::STATUS_NEW        => $langs->trans('LemonSuperPDPRecStatusNew'),
 	LemonSuperPDPReception::STATUS_IMPORTED   => $langs->trans('LemonSuperPDPRecStatusImported'),
@@ -254,10 +326,13 @@ while ($i < $imax) {
 	// Date de réception
 	print '<td class="nowrap">'.dol_print_date($db->jdate($obj->date_fetched), 'dayhour').'</td>';
 
-	// Numéro + type
+	// Numéro + type + source
 	print '<td>'.dol_escape_htmltag((string) $obj->invoice_number);
 	if ((string) $obj->invoice_type_code === '381') {
 		print ' <span class="opacitymedium">('.$langs->trans('CreditNote').')</span>';
+	}
+	if ((string) $obj->source === LemonSuperPDPReception::SOURCE_MANUAL) {
+		print ' '.img_picto($langs->trans('LemonSuperPDPRecSourceManual'), 'uparrow', 'class="opacitymedium"');
 	}
 	print '</td>';
 
@@ -282,13 +357,16 @@ while ($i < $imax) {
 	// Montant TTC
 	print '<td class="right nowrap">'.($obj->total_ttc !== null ? price($obj->total_ttc, 0, $langs, 1, -1, -1, (string) $obj->currency_code) : '').'</td>';
 
-	// Statut + message éventuel en tooltip
+	// Statut + message éventuel en tooltip + dernier statut AFNOR émis
 	print '<td class="center">';
 	$badge = '<span class="badge '.$rec->getBadgeClass().'">'.$langs->trans($rec->getStatusLabelKey()).'</span>';
 	if (!empty($obj->error_message)) {
 		print $form->textwithpicto($badge, dol_escape_htmltag($obj->error_message), 1, 'help', '', 0, 3);
 	} else {
 		print $badge;
+	}
+	if (!empty($obj->lifecycle_status)) {
+		print '<br><span class="opacitymedium small">'.dol_escape_htmltag($obj->lifecycle_status.' '.LemonSuperPDPEvent::getStatusLabel($obj->lifecycle_status)).'</span>';
 	}
 	print '</td>';
 
@@ -318,6 +396,15 @@ while ($i < $imax) {
 			print '<a class="editfielda paddingleft" href="'.$_SERVER["PHP_SELF"].'?action=ignore&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="'.dol_escape_htmltag($langs->trans('LemonSuperPDPRecIgnore')).'">'.img_picto($langs->trans('LemonSuperPDPRecIgnore'), 'disable').'</a>';
 		} else {
 			print '<a class="editfielda paddingleft" href="'.$_SERVER["PHP_SELF"].'?action=unignore&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="'.dol_escape_htmltag($langs->trans('LemonSuperPDPRecUnignore')).'">'.img_picto($langs->trans('LemonSuperPDPRecUnignore'), 'enable').'</a>';
+		}
+	}
+	// Cycle de vie acheteur : approuver / refuser une facture importée venant de la PA
+	if ($canWrite && $obj->status === LemonSuperPDPReception::STATUS_IMPORTED && !empty($obj->superpdp_id)) {
+		if ($obj->lifecycle_status !== LemonSuperPDPEvent::STATUS_APPROUVEE) {
+			print '<a class="butActionSmall" href="'.$_SERVER["PHP_SELF"].'?action=accept&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="fr:206">'.$langs->trans('LemonSuperPDPRecAccept').'</a> ';
+		}
+		if ($obj->lifecycle_status !== LemonSuperPDPEvent::STATUS_REFUSEE) {
+			print '<a class="butActionDeleteSmall" href="'.$_SERVER["PHP_SELF"].'?action=refuse&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="fr:210" onclick="return confirm(\''.dol_escape_js($langs->trans('LemonSuperPDPRecRefuseConfirm')).'\');">'.$langs->trans('LemonSuperPDPRecRefuse').'</a>';
 		}
 	}
 	print '</td>';

@@ -377,11 +377,12 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 				$nbKo++;
 				continue;
 			}
-			$outcome = $this->sendOneInvoice($facture, $user);
-			switch ($outcome) {
-				case 'ok':       $nbOk++; break;
-				case 'error':    $nbKo++; break;
-				default:         $nbSkipped++; break;
+			$result = $this->sendOneInvoice($facture, $user);
+			switch (isset($result['outcome']) ? $result['outcome'] : 'error') {
+				case 'ok':
+				case 'ok-recovered': $nbOk++; break;
+				case 'error':        $nbKo++; break;
+				default:             $nbSkipped++; break;
 			}
 		}
 
@@ -573,6 +574,41 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 		$t = new LemonSuperPDPTransmission($this->db);
 		if ($t->hasSuccessfulTransmission($facture->id)) {
 			return array('outcome' => 'skipped-already', 'message' => $langs->trans('LemonSuperPDPAlreadySent'));
+		}
+
+		// Pre-check annuaire : vérifie que le destinataire a une adresse
+		// électronique active dans l'annuaire avant de consommer un envoi.
+		// Fail-open : si l'annuaire est injoignable on tente quand même,
+		// la PA refera le contrôle. Désactivé en mode sandbox (les SIREN
+		// de test n'existent pas dans l'annuaire de production).
+		if (getDolGlobalInt('LEMONSUPERPDP_PRECHECK_DIRECTORY', 1) && !getDolGlobalInt('LEMONSUPERPDP_SANDBOX_MODE')) {
+			$buyerSiren = '';
+			if (!empty($facture->thirdparty)) {
+				$rawId = !empty($facture->thirdparty->idprof2) ? $facture->thirdparty->idprof2 : ($facture->thirdparty->idprof1 ?? '');
+				$digits = preg_replace('/[^0-9]/', '', (string) $rawId);
+				if (strlen($digits) === 9 || strlen($digits) === 14) {
+					$buyerSiren = substr($digits, 0, 9);
+				}
+			}
+			if ($buyerSiren !== '') {
+				dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+				try {
+					$dirClient = new SuperPDPClient($this->db);
+					$entries = $dirClient->listDirectoryEntries($buyerSiren);
+					$active = false;
+					foreach ((array) (isset($entries['data']) ? $entries['data'] : array()) as $entry) {
+						if (!isset($entry['is_active']) || !empty($entry['is_active'])) {
+							$active = true;
+							break;
+						}
+					}
+					if (!$active) {
+						return array('outcome' => 'skipped-notroutable', 'message' => $langs->trans('LemonSuperPDPNotRoutable', $buyerSiren));
+					}
+				} catch (Exception $e) {
+					dol_syslog('LemonSuperPDP: pre-check annuaire indisponible ('.$e->getMessage().'), envoi tenté quand même', LOG_WARNING);
+				}
+			}
 		}
 
 		$pdfPath = $this->getInvoicePdfPath($facture);

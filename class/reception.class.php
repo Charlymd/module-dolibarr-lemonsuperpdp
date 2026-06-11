@@ -30,6 +30,7 @@ class LemonSuperPDPReception extends CommonObject
 	public $rowid;
 	public $entity;
 	public $superpdp_id;
+	public $source;              // 'pa' (polling plateforme) ou 'manual' (upload)
 	public $fk_facture_fourn;
 	public $fk_soc;
 	public $supplier_name;
@@ -43,6 +44,7 @@ class LemonSuperPDPReception extends CommonObject
 	public $total_ttc;
 	public $currency_code;
 	public $status;
+	public $lifecycle_status;    // dernier statut AFNOR émis côté acheteur (fr:206, fr:210...)
 	public $error_message;
 	public $payload_raw;
 	public $date_fetched;
@@ -55,6 +57,9 @@ class LemonSuperPDPReception extends CommonObject
 	const STATUS_QUARANTINE = 'quarantine';  // tiers introuvable ou ambigu, action manuelle requise
 	const STATUS_IGNORED    = 'ignored';     // écartée volontairement par l'utilisateur
 	const STATUS_ERROR      = 'error';       // échec technique à l'import
+
+	const SOURCE_PA     = 'pa';
+	const SOURCE_MANUAL = 'manual';
 
 	/** Pagination du polling : garde-fou contre une réponse API incohérente. */
 	const MAX_PAGES = 50;
@@ -70,6 +75,7 @@ class LemonSuperPDPReception extends CommonObject
 		$this->rowid = $obj->rowid;
 		$this->entity = $obj->entity;
 		$this->superpdp_id = $obj->superpdp_id;
+		$this->source = $obj->source;
 		$this->fk_facture_fourn = $obj->fk_facture_fourn;
 		$this->fk_soc = $obj->fk_soc;
 		$this->supplier_name = $obj->supplier_name;
@@ -83,6 +89,7 @@ class LemonSuperPDPReception extends CommonObject
 		$this->total_ttc = $obj->total_ttc;
 		$this->currency_code = $obj->currency_code;
 		$this->status = $obj->status;
+		$this->lifecycle_status = $obj->lifecycle_status;
 		$this->error_message = $obj->error_message;
 		$this->payload_raw = $obj->payload_raw;
 		$this->date_fetched = $this->db->jdate($obj->date_fetched);
@@ -97,12 +104,13 @@ class LemonSuperPDPReception extends CommonObject
 		$now = dol_now();
 
 		$sql = "INSERT INTO ".MAIN_DB_PREFIX."lemonsuperpdp_reception (";
-		$sql .= "entity, superpdp_id, fk_soc, supplier_name, supplier_siren, supplier_vat,";
+		$sql .= "entity, superpdp_id, source, fk_soc, supplier_name, supplier_siren, supplier_vat,";
 		$sql .= " invoice_number, invoice_type_code, invoice_date, due_date, total_ht, total_ttc,";
 		$sql .= " currency_code, status, error_message, payload_raw, date_fetched";
 		$sql .= ") VALUES (";
 		$sql .= ((int) $conf->entity);
-		$sql .= ", ".((int) $this->superpdp_id);
+		$sql .= ", ".(!empty($this->superpdp_id) ? ((int) $this->superpdp_id) : "NULL");
+		$sql .= ", '".$this->db->escape(!empty($this->source) ? $this->source : self::SOURCE_PA)."'";
 		$sql .= ", ".(!empty($this->fk_soc) ? ((int) $this->fk_soc) : "NULL");
 		$sql .= ", ".($this->supplier_name !== null ? "'".$this->db->escape(dol_trunc($this->supplier_name, 252))."'" : "NULL");
 		$sql .= ", ".($this->supplier_siren !== null ? "'".$this->db->escape($this->supplier_siren)."'" : "NULL");
@@ -159,6 +167,7 @@ class LemonSuperPDPReception extends CommonObject
 		$sql .= " fk_facture_fourn = ".(!empty($this->fk_facture_fourn) ? ((int) $this->fk_facture_fourn) : "NULL");
 		$sql .= ", fk_soc = ".(!empty($this->fk_soc) ? ((int) $this->fk_soc) : "NULL");
 		$sql .= ", status = '".$this->db->escape($this->status)."'";
+		$sql .= ", lifecycle_status = ".(!empty($this->lifecycle_status) ? "'".$this->db->escape($this->lifecycle_status)."'" : "NULL");
 		$sql .= ", error_message = ".($this->error_message !== null ? "'".$this->db->escape($this->error_message)."'" : "NULL");
 		$sql .= ", date_imported = ".(!empty($this->date_imported) ? "'".$this->db->idate($this->date_imported)."'" : "NULL");
 		$sql .= ", fk_user_import = ".(!empty($this->fk_user_import) ? ((int) $this->fk_user_import) : "NULL");
@@ -383,12 +392,14 @@ class LemonSuperPDPReception extends CommonObject
 	 * Crée la FactureFournisseur Dolibarr en brouillon depuis le payload
 	 * en_invoice, télécharge le fichier original et l'attache.
 	 *
-	 * @param User                $user    Utilisateur qui importe
-	 * @param SuperPDPClient|null $client  Client API pour le téléchargement (instancié si null)
-	 * @param int                 $socid   Tiers forcé (0 = utiliser fk_soc résolu)
+	 * @param User                $user         Utilisateur qui importe
+	 * @param SuperPDPClient|null $client       Client API pour le téléchargement (instancié si null)
+	 * @param int                 $socid        Tiers forcé (0 = utiliser fk_soc résolu)
+	 * @param string|null         $localContent Contenu du fichier original pour un import
+	 *                                          manuel (sinon téléchargé depuis la PA)
 	 * @return int  ID FactureFournisseur créée, ou -1 (l'erreur est posée sur la ligne)
 	 */
-	public function importAsSupplierInvoice($user, $client = null, $socid = 0)
+	public function importAsSupplierInvoice($user, $client = null, $socid = 0, $localContent = null)
 	{
 		global $conf;
 
@@ -422,10 +433,12 @@ class LemonSuperPDPReception extends CommonObject
 		$ff = new FactureFournisseur($this->db);
 		$ff->socid = $targetSoc;
 		$ff->type = ((string) $this->invoice_type_code === '381') ? FactureFournisseur::TYPE_CREDIT_NOTE : FactureFournisseur::TYPE_STANDARD;
-		$ff->ref_supplier = !empty($this->invoice_number) ? $this->invoice_number : 'SUPERPDP-'.$this->superpdp_id;
+		$ff->ref_supplier = !empty($this->invoice_number) ? $this->invoice_number : 'SUPERPDP-'.((int) $this->superpdp_id);
 		$ff->date = !empty($this->invoice_date) ? $this->invoice_date : dol_now();
 		$ff->date_echeance = !empty($this->due_date) ? $this->due_date : '';
-		$ff->note_private = 'Importée automatiquement depuis SUPER PDP (facture plateforme n° '.((int) $this->superpdp_id).'). À vérifier avant validation.';
+		$ff->note_private = ($this->source === self::SOURCE_MANUAL)
+			? 'Importée manuellement (fichier Factur-X/XML converti via SUPER PDP). À vérifier avant validation.'
+			: 'Importée automatiquement depuis SUPER PDP (facture plateforme n° '.((int) $this->superpdp_id).'). À vérifier avant validation.';
 
 		$ffid = $ff->create($user);
 		if ($ffid <= 0) {
@@ -470,11 +483,11 @@ class LemonSuperPDPReception extends CommonObject
 		// facture brouillon existe déjà, une erreur réseau ne doit pas la perdre).
 		$attachError = '';
 		try {
-			if ($client === null) {
+			if ($localContent === null && $client === null) {
 				dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
 				$client = new SuperPDPClient($this->db);
 			}
-			$this->attachOriginalFile($ff, $client);
+			$this->attachOriginalFile($ff, $client, $localContent);
 		} catch (Exception $e) {
 			$attachError = 'Fichier original non attaché : '.$e->getMessage();
 			dol_syslog('LemonSuperPDPReception::importAsSupplierInvoice attach : '.$e->getMessage(), LOG_WARNING);
@@ -540,11 +553,17 @@ class LemonSuperPDPReception extends CommonObject
 	 *
 	 * @throws SuperPDPException|Exception
 	 */
-	private function attachOriginalFile($ff, $client)
+	private function attachOriginalFile($ff, $client, $localContent = null)
 	{
 		global $conf;
 
-		$content = $client->downloadInvoice((int) $this->superpdp_id);
+		if ($localContent !== null) {
+			$content = $localContent;
+		} elseif (!empty($this->superpdp_id)) {
+			$content = $client->downloadInvoice((int) $this->superpdp_id);
+		} else {
+			return;
+		}
 		$ext = (strpos($content, '%PDF') === 0) ? 'pdf' : 'xml';
 
 		$upload_dir = $conf->fournisseur->facture->dir_output.'/'.get_exdir($ff->id, 2, 0, 0, $ff, 'invoice_supplier').dol_sanitizeFileName($ff->ref);
@@ -554,7 +573,7 @@ class LemonSuperPDPReception extends CommonObject
 			}
 		}
 
-		$base = !empty($this->invoice_number) ? $this->invoice_number : 'superpdp-'.$this->superpdp_id;
+		$base = !empty($this->invoice_number) ? $this->invoice_number : (!empty($this->superpdp_id) ? 'superpdp-'.((int) $this->superpdp_id) : 'import-manuel-'.((int) $this->id));
 		$filename = dol_sanitizeFileName($base.'-recue-superpdp.'.$ext);
 		$filepath = $upload_dir.'/'.$filename;
 
@@ -575,6 +594,183 @@ class LemonSuperPDPReception extends CommonObject
 			$this->update($user);
 		}
 		dol_syslog('LemonSuperPDPReception::importAsSupplierInvoice : '.$message, LOG_ERR);
+		return -1;
+	}
+
+	/**
+	 * Import manuel d'un fichier Factur-X (PDF) ou XML (CII/UBL) : conversion
+	 * en en_invoice via la PA (POST /invoices/convert), création de la
+	 * réception (source=manual) puis import en FactureFournisseur brouillon
+	 * si le tiers est résolu, quarantaine sinon.
+	 *
+	 * @param DoliDB              $db       Connexion base
+	 * @param User                $user     Utilisateur qui importe
+	 * @param string              $content  Contenu brut du fichier uploadé
+	 * @param SuperPDPClient|null $client   Client API (instancié si null)
+	 * @return self  La réception créée (consulter status/error_message)
+	 * @throws SuperPDPException
+	 */
+	public static function createFromManualUpload($db, $user, $content, $client = null)
+	{
+		if ($client === null) {
+			dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+			$client = new SuperPDPClient($db);
+		}
+
+		// Détection du format : PDF Factur-X au magic byte, sinon XML dont la
+		// racine départage CII (CrossIndustryInvoice) et UBL (Invoice/CreditNote).
+		if (strpos($content, '%PDF') === 0) {
+			$fromFormat = 'factur-x';
+		} elseif (stripos($content, 'CrossIndustryInvoice') !== false) {
+			$fromFormat = 'cii';
+		} else {
+			$fromFormat = 'ubl';
+		}
+
+		$en = $client->convertInvoice($content, $fromFormat, 'en16931');
+
+		// On reconstitue la même enveloppe que le polling ({en_invoice: ...})
+		// pour partager buildFromApiInvoice() et importAsSupplierInvoice().
+		$rec = self::buildFromApiInvoice($db, array('id' => 0, 'en_invoice' => $en));
+		$rec->superpdp_id = null;
+		$rec->source = self::SOURCE_MANUAL;
+
+		$socid = $rec->resolveThirdparty();
+		if ($socid > 0) {
+			$rec->fk_soc = $socid;
+		} else {
+			$rec->status = self::STATUS_QUARANTINE;
+			$rec->error_message = ($socid === -1)
+				? 'Plusieurs tiers Dolibarr correspondent au SIREN '.$rec->supplier_siren
+				: 'Aucun tiers Dolibarr ne correspond (SIREN '.($rec->supplier_siren !== null ? $rec->supplier_siren : 'absent').')';
+		}
+
+		if ($rec->create($user) <= 0) {
+			throw new SuperPDPException('Enregistrement de la réception impossible : '.$rec->error);
+		}
+
+		if ($rec->status !== self::STATUS_QUARANTINE) {
+			$rec->importAsSupplierInvoice($user, $client, 0, $content);
+		} else {
+			// Conserve le fichier original dans le payload pour l'import différé
+			// (après création/choix du tiers).
+			$rec->storeOriginalFileContent($user, $content);
+		}
+
+		return $rec;
+	}
+
+	/**
+	 * Stocke le fichier original (base64) dans le payload de la réception,
+	 * pour qu'un import manuel mis en quarantaine puisse attacher le fichier
+	 * une fois le tiers choisi.
+	 */
+	public function storeOriginalFileContent($user, $content)
+	{
+		$inv = json_decode((string) $this->payload_raw, true);
+		if (!is_array($inv)) $inv = array();
+		$inv['original_file_b64'] = base64_encode($content);
+		$this->payload_raw = json_encode($inv);
+		$sql = "UPDATE ".MAIN_DB_PREFIX."lemonsuperpdp_reception";
+		$sql .= " SET payload_raw = '".$this->db->escape($this->payload_raw)."'";
+		$sql .= " WHERE rowid = ".((int) $this->id);
+		$this->db->query($sql);
+	}
+
+	/**
+	 * Restitue le fichier original conservé dans le payload (import manuel
+	 * en quarantaine), ou null.
+	 */
+	public function getStoredOriginalFileContent()
+	{
+		$inv = json_decode((string) $this->payload_raw, true);
+		if (is_array($inv) && !empty($inv['original_file_b64'])) {
+			$decoded = base64_decode((string) $inv['original_file_b64'], true);
+			return ($decoded !== false) ? $decoded : null;
+		}
+		return null;
+	}
+
+	/**
+	 * Émet un statut de cycle de vie côté acheteur (fr:205 prise en charge,
+	 * fr:206 approuvée, fr:210 refusée, fr:209 paiement transmis...) pour
+	 * cette facture reçue, et le trace dans l'agenda de la facture fournisseur.
+	 *
+	 * @param User                $user        Utilisateur
+	 * @param string              $statusCode  Code AFNOR fr:2xx
+	 * @param SuperPDPClient|null $client      Client API (instancié si null)
+	 * @param array               $details     Détails optionnels (montants...)
+	 * @return int  1 OK, -1 KO ($this->error renseigné)
+	 */
+	public function sendLifecycleEvent($user, $statusCode, $client = null, $details = array())
+	{
+		if (empty($this->superpdp_id)) {
+			$this->error = 'Réception sans identifiant SUPER PDP (import manuel) : statut non transmissible';
+			return -1;
+		}
+
+		try {
+			if ($client === null) {
+				dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+				$client = new SuperPDPClient($this->db);
+			}
+			$response = $client->submitEvent((int) $this->superpdp_id, $statusCode, $details);
+		} catch (Exception $e) {
+			$this->error = $e->getMessage();
+			dol_syslog('LemonSuperPDPReception::sendLifecycleEvent '.$statusCode.' : '.$e->getMessage(), LOG_ERR);
+			return -1;
+		}
+
+		$this->lifecycle_status = $statusCode;
+		$this->update($user);
+
+		// Trace agenda sur la facture fournisseur liée.
+		if (!empty($this->fk_facture_fourn)) {
+			dol_include_once('/lemonsuperpdp/class/event.class.php');
+			require_once DOL_DOCUMENT_ROOT.'/comm/action/class/actioncomm.class.php';
+			$label = LemonSuperPDPEvent::getStatusLabel($statusCode);
+			$ac = new ActionComm($this->db);
+			$ac->type_code = 'AC_OTH_AUTO';
+			$ac->code = 'LEMONSUPERPDP_'.strtoupper(str_replace(array(':', '-'), '_', $statusCode));
+			$ac->label = 'SUPER PDP : '.$label.' ('.$statusCode.') (émis)';
+			$ac->note_private = 'Statut '.$statusCode.' émis vers SUPER PDP pour la facture reçue n° '.((int) $this->superpdp_id)."\n\nRéponse :\n".json_encode($response);
+			$ac->elementtype = 'invoice_supplier';
+			$ac->fk_element = (int) $this->fk_facture_fourn;
+			$ac->datep = dol_now();
+			$ac->datef = dol_now();
+			$ac->percentage = -1;
+			$ac->create($user);
+		}
+
+		return 1;
+	}
+
+	/**
+	 * Charge la réception liée à une facture fournisseur donnée (la plus récente).
+	 *
+	 * @param int $fkFactureFourn
+	 * @return int  1 trouvé, 0 absent, -1 erreur
+	 */
+	public function fetchByFactureFourn($fkFactureFourn)
+	{
+		global $conf;
+		$sql = "SELECT * FROM ".MAIN_DB_PREFIX."lemonsuperpdp_reception";
+		$sql .= " WHERE fk_facture_fourn = ".((int) $fkFactureFourn);
+		$sql .= " AND entity = ".((int) $conf->entity);
+		$sql .= " ORDER BY rowid DESC LIMIT 1";
+
+		$resql = $this->db->query($sql);
+		if ($resql) {
+			$found = 0;
+			if ($this->db->num_rows($resql)) {
+				$obj = $this->db->fetch_object($resql);
+				$this->_setFromRow($obj);
+				$found = 1;
+			}
+			$this->db->free($resql);
+			return $found;
+		}
+		$this->error = $this->db->lasterror();
 		return -1;
 	}
 

@@ -48,6 +48,8 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	$clientSecret = trim(GETPOST('LEMONSUPERPDP_CLIENT_SECRET', 'alphanohtml'));
 	$format = GETPOST('LEMONSUPERPDP_FORMAT', 'alpha');
 	$inEnabled = GETPOSTINT('LEMONSUPERPDP_IN_ENABLED');
+	$ereportingEnabled = GETPOSTINT('LEMONSUPERPDP_EREPORTING_ENABLED');
+	$precheckDirectory = GETPOSTINT('LEMONSUPERPDP_PRECHECK_DIRECTORY');
 	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 	$sandboxMode = GETPOSTINT('LEMONSUPERPDP_SANDBOX_MODE');
 	// >>> FIN SANDBOX MODE <<<
@@ -85,6 +87,12 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		$error++;
 	}
 	if (dolibarr_set_const($db, 'LEMONSUPERPDP_IN_ENABLED', $inEnabled, 'int', 0, '', $conf->entity) < 0) {
+		$error++;
+	}
+	if (dolibarr_set_const($db, 'LEMONSUPERPDP_EREPORTING_ENABLED', $ereportingEnabled, 'int', 0, '', $conf->entity) < 0) {
+		$error++;
+	}
+	if (dolibarr_set_const($db, 'LEMONSUPERPDP_PRECHECK_DIRECTORY', $precheckDirectory, 'int', 0, '', $conf->entity) < 0) {
 		$error++;
 	}
 	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
@@ -266,6 +274,35 @@ print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPInEnabledHe
 if ($inCurrent) {
 	print '<br><a href="'.dol_buildpath('/lemonsuperpdp/reception_list.php', 1).'">'.$langs->trans("LemonSuperPDPRecListTitle").'</a>';
 }
+print '</td>';
+print '</tr>';
+
+// E-reporting B2C (transactions et paiements des factures aux particuliers)
+print '<tr class="oddeven">';
+print '<td>'.$langs->trans("LemonSuperPDPEreportingEnabled").'</td>';
+print '<td>';
+$ereportingCurrent = getDolGlobalInt('LEMONSUPERPDP_EREPORTING_ENABLED');
+print '<select name="LEMONSUPERPDP_EREPORTING_ENABLED" class="flat">';
+print '<option value="0"'.(!$ereportingCurrent ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '<option value="1"'.($ereportingCurrent ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
+print '</select>';
+print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPEreportingEnabledHelp").'</span>';
+if ($ereportingCurrent) {
+	print '<br><a href="'.dol_buildpath('/lemonsuperpdp/ereporting_list.php', 1).'">'.$langs->trans("LemonSuperPDPEreportingListTitle").'</a>';
+}
+print '</td>';
+print '</tr>';
+
+// Pre-check annuaire des Plateformes Agréées avant chaque envoi
+print '<tr class="oddeven">';
+print '<td>'.$langs->trans("LemonSuperPDPPrecheckDirectory").'</td>';
+print '<td>';
+$precheckCurrent = getDolGlobalInt('LEMONSUPERPDP_PRECHECK_DIRECTORY', 1);
+print '<select name="LEMONSUPERPDP_PRECHECK_DIRECTORY" class="flat">';
+print '<option value="0"'.(!$precheckCurrent ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '<option value="1"'.($precheckCurrent ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
+print '</select>';
+print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPPrecheckDirectoryHelp").'</span>';
 print '</td>';
 print '</tr>';
 

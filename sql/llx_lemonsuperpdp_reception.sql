@@ -1,7 +1,8 @@
 CREATE TABLE llx_lemonsuperpdp_reception (
   rowid              integer AUTO_INCREMENT PRIMARY KEY,
   entity             integer NOT NULL DEFAULT 1,
-  superpdp_id        bigint NOT NULL,
+  superpdp_id        bigint NULL,
+  source             varchar(16) NOT NULL DEFAULT 'pa',
   fk_facture_fourn   integer NULL,
   fk_soc             integer NULL,
   supplier_name      varchar(255) NULL,
@@ -15,6 +16,7 @@ CREATE TABLE llx_lemonsuperpdp_reception (
   total_ttc          double(24,8) NULL,
   currency_code      varchar(8) NULL,
   status             varchar(32) NOT NULL DEFAULT 'new',
+  lifecycle_status   varchar(16) NULL,
   error_message      text NULL,
   payload_raw        mediumtext NULL,
   date_fetched       datetime NOT NULL,

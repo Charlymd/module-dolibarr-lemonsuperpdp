@@ -199,6 +199,57 @@ class LemonSuperPDPCron
 	}
 
 	/**
+	 * Pousse les déclarations e-reporting B2C en attente (transactions et
+	 * paiements) vers l'API SUPER PDP.
+	 *
+	 * Déclaration de la tâche Dolibarr :
+	 *   Classe  : LemonSuperPDPCron
+	 *   Fichier : /lemonsuperpdp/class/lemonsuperpdp_cron.class.php
+	 *   Méthode : sendEreporting
+	 *
+	 * @param string $param  Paramètre libre (non utilisé)
+	 * @return int           0 = succès, <0 = erreur
+	 */
+	public function sendEreporting($param = '')
+	{
+		global $user;
+
+		$this->output = '';
+		$this->error = '';
+
+		if (!isModEnabled('lemonsuperpdp')) {
+			$this->output = 'Module lemonsuperpdp désactivé';
+			return 0;
+		}
+		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) {
+			$this->output = 'LEMONSUPERPDP_ENABLED=0';
+			return 0;
+		}
+		if (!getDolGlobalInt('LEMONSUPERPDP_EREPORTING_ENABLED')) {
+			$this->output = 'E-reporting désactivé (LEMONSUPERPDP_EREPORTING_ENABLED=0)';
+			return 0;
+		}
+
+		if (empty($user) || empty($user->id)) {
+			require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+			$user = new User($this->db);
+			$user->fetch(1);
+		}
+
+		dol_include_once('/lemonsuperpdp/class/ereporting.class.php');
+
+		try {
+			$res = LemonSuperPDPEreporting::processPending($this->db, $user);
+			$this->output = $res['sent'].' déclaration(s) transmise(s), '.$res['errors'].' refusée(s), '.$res['pending'].' à retenter';
+			return ($res['errors'] > 0) ? -1 : 0;
+		} catch (Exception $e) {
+			$this->error = $e->getMessage();
+			dol_syslog('LemonSuperPDPCron::sendEreporting : '.$e->getMessage(), LOG_ERR);
+			return -1;
+		}
+	}
+
+	/**
 	 * Pour chaque transmission en paramètre, recalcule le status local à
 	 * partir de son event le plus récent.
 	 *

@@ -274,6 +274,63 @@ class SuperPDPClient
 	}
 
 	/**
+	 * Liste les entrées d'annuaire (adresses électroniques routables) d'une
+	 * entreprise par son SIREN. Sert au pre-check avant envoi : une entreprise
+	 * sans entrée active n'est pas joignable sur le réseau des PA.
+	 *
+	 * @param string $siren  SIREN à 9 chiffres
+	 * @return array         Réponse brute (data[] de french_directory_entry)
+	 * @throws SuperPDPException
+	 */
+	public function listDirectoryEntries($siren)
+	{
+		return $this->request('GET', '/v1.beta/french_directory/entries?number='.urlencode($siren));
+	}
+
+	/**
+	 * Convertit une facture d'un format vers un autre via la PA.
+	 * Usage principal : factur-x/cii/ubl → en16931 (JSON structuré identique
+	 * au en_invoice du polling), pour l'import manuel sans parsing local.
+	 *
+	 * @param string $content     Contenu brut du fichier (PDF ou XML)
+	 * @param string $fromFormat  'factur-x', 'cii' ou 'ubl'
+	 * @param string $toFormat    'en16931' (défaut), 'cii', 'ubl'
+	 * @return array              en_invoice JSON décodé
+	 * @throws SuperPDPException
+	 */
+	public function convertInvoice($content, $fromFormat, $toFormat = 'en16931')
+	{
+		$contentType = ($fromFormat === 'factur-x') ? 'application/pdf' : 'application/xml';
+		$path = '/v1.beta/invoices/convert?from='.urlencode($fromFormat).'&to='.urlencode($toFormat);
+		return $this->request('POST', $path, $content, $contentType);
+	}
+
+	/**
+	 * Déclare des transactions B2C (e-reporting). La PA stocke, agrège et
+	 * transmet au PPF selon le régime de TVA configuré côté SUPER PDP.
+	 *
+	 * @param array $transactions  Liste d'objets b2c_transaction
+	 * @return array               Réponse brute (data[] avec les ids créés)
+	 * @throws SuperPDPException
+	 */
+	public function createB2CTransactions(array $transactions)
+	{
+		return $this->request('POST', '/v1.beta/b2c_transactions', json_encode(array('data' => array_values($transactions))), 'application/json');
+	}
+
+	/**
+	 * Déclare des paiements B2C (e-reporting, données de paiement).
+	 *
+	 * @param array $payments  Liste d'objets b2c_payment
+	 * @return array           Réponse brute (data[] avec les ids créés)
+	 * @throws SuperPDPException
+	 */
+	public function createB2CPayments(array $payments)
+	{
+		return $this->request('POST', '/v1.beta/b2c_payments', json_encode(array('data' => array_values($payments))), 'application/json');
+	}
+
+	/**
 	 * Appel HTTP générique avec authentification Bearer.
 	 *
 	 * @param string $method      GET, POST, ...

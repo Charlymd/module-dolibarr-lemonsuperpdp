@@ -39,26 +39,99 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 	{
 		if (!isModEnabled('lemonsuperpdp')) return 0;
 		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) return 0;
+		if (!is_object($object) || !isset($object->element)) return 0;
 
-		// BILL_PAYED : déclenché quand toutes les lignes de règlement couvrent
-		// le TTC de la facture, après validation du paiement. C'est le seul
-		// trigger qui nous intéresse pour émettre l'event fr:212 Encaissée.
-		if ($action !== 'BILL_PAYED') return 0;
-
-		if (!is_object($object) || !isset($object->element) || $object->element !== 'facture') return 0;
-
-		dol_syslog('LemonSuperPDP trigger: '.$action.' sur facture '.$object->id, LOG_INFO);
-
+		// Aucun de ces traitements ne doit faire échouer l'action Dolibarr :
+		// la validation/le paiement passent même si SUPER PDP est indisponible.
 		try {
-			$this->sendEncaisseeEvent($object, $user);
+			// Facture client validée : si B2C, met en file la transaction e-reporting.
+			if ($action === 'BILL_VALIDATE' && $object->element === 'facture') {
+				return $this->queueEreportingTransaction($object, $user);
+			}
+
+			// Facture client payée : fr:212 Encaissée (B2B transmis) ou
+			// déclaration de paiement e-reporting (B2C).
+			if ($action === 'BILL_PAYED' && $object->element === 'facture') {
+				dol_syslog('LemonSuperPDP trigger: '.$action.' sur facture '.$object->id, LOG_INFO);
+				dol_include_once('/lemonsuperpdp/class/ereporting.class.php');
+				if (LemonSuperPDPEreporting::isB2CInvoice($object)) {
+					if (!getDolGlobalInt('LEMONSUPERPDP_EREPORTING_ENABLED')) return 0;
+					$ret = LemonSuperPDPEreporting::queuePaymentForInvoice($this->db, $object, $this->getLastPaymentDate($object->id, 'paiement_facture', 'fk_facture'), $user);
+					return ($ret >= 0) ? 1 : 0;
+				}
+				$this->sendEncaisseeEvent($object, $user);
+				return 1;
+			}
+
+			// Facture fournisseur payée : fr:209 Paiement transmis vers le
+			// fournisseur, si la facture vient d'une réception SUPER PDP.
+			if ($action === 'BILL_SUPPLIER_PAYED' && $object->element === 'invoice_supplier') {
+				return $this->sendSupplierPaymentEvent($object, $user);
+			}
 		} catch (Exception $e) {
-			dol_syslog('LemonSuperPDP trigger: échec envoi fr:212 facture '.$object->id.' : '.$e->getMessage(), LOG_ERR);
-			// On n'échoue PAS le trigger : le paiement Dolibarr doit passer
-			// même si SUPER PDP est indisponible. Le cron de polling rattrapera.
+			dol_syslog('LemonSuperPDP trigger: échec '.$action.' sur '.$object->element.' '.$object->id.' : '.$e->getMessage(), LOG_ERR);
 			return 0;
 		}
 
-		return 1;
+		return 0;
+	}
+
+	/**
+	 * Met en file la transaction e-reporting d'une facture B2C validée.
+	 */
+	private function queueEreportingTransaction($facture, $user)
+	{
+		if (!getDolGlobalInt('LEMONSUPERPDP_EREPORTING_ENABLED')) return 0;
+
+		dol_include_once('/lemonsuperpdp/class/ereporting.class.php');
+		if (!LemonSuperPDPEreporting::isB2CInvoice($facture)) return 0;
+
+		$nb = LemonSuperPDPEreporting::queueTransactionForInvoice($this->db, $facture, $user);
+		if ($nb > 0) {
+			dol_syslog('LemonSuperPDP trigger: '.$nb.' transaction(s) e-reporting en file pour facture '.$facture->ref, LOG_INFO);
+		}
+		return ($nb >= 0) ? 1 : 0;
+	}
+
+	/**
+	 * Émet fr:209 (Paiement transmis) vers SUPER PDP quand une facture
+	 * fournisseur issue d'une réception est soldée.
+	 */
+	private function sendSupplierPaymentEvent($factureFourn, $user)
+	{
+		dol_include_once('/lemonsuperpdp/class/reception.class.php');
+
+		$rec = new LemonSuperPDPReception($this->db);
+		if ($rec->fetchByFactureFourn($factureFourn->id) <= 0) return 0;
+		if (empty($rec->superpdp_id)) return 0;
+		if ($rec->lifecycle_status === LemonSuperPDPEvent::STATUS_PAIEMENT_TRANSMIS) return 0;
+
+		dol_include_once('/lemonsuperpdp/class/event.class.php');
+		$ret = $rec->sendLifecycleEvent($user, LemonSuperPDPEvent::STATUS_PAIEMENT_TRANSMIS);
+		if ($ret > 0) {
+			dol_syslog('LemonSuperPDP trigger: fr:209 envoyé pour facture fournisseur '.$factureFourn->ref.' (réception '.$rec->id.')', LOG_INFO);
+		}
+		return ($ret > 0) ? 1 : 0;
+	}
+
+	/**
+	 * Date (Y-m-d) du dernier paiement lié à une facture, ou date du jour.
+	 */
+	private function getLastPaymentDate($fkFacture, $linkTable, $linkField)
+	{
+		$paymentDate = date('Y-m-d');
+		$sql = "SELECT MAX(p.datep) AS last_pay FROM ".MAIN_DB_PREFIX."paiement p";
+		$sql .= " INNER JOIN ".MAIN_DB_PREFIX.$linkTable." pf ON pf.fk_paiement = p.rowid";
+		$sql .= " WHERE pf.".$linkField." = ".((int) $fkFacture);
+		$resql = $this->db->query($sql);
+		if ($resql) {
+			$obj = $this->db->fetch_object($resql);
+			if (!empty($obj) && !empty($obj->last_pay)) {
+				$paymentDate = date('Y-m-d', $this->db->jdate($obj->last_pay));
+			}
+			$this->db->free($resql);
+		}
+		return $paymentDate;
 	}
 
 	/**
@@ -87,18 +160,7 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 
 		// Date d'encaissement : on prend la date du dernier paiement si dispo,
 		// sinon la date du jour.
-		$paymentDate = date('Y-m-d');
-		$sql = "SELECT MAX(p.datep) AS last_pay FROM ".MAIN_DB_PREFIX."paiement p";
-		$sql .= " INNER JOIN ".MAIN_DB_PREFIX."paiement_facture pf ON pf.fk_paiement = p.rowid";
-		$sql .= " WHERE pf.fk_facture = ".((int) $facture->id);
-		$resql = $this->db->query($sql);
-		if ($resql) {
-			$obj = $this->db->fetch_object($resql);
-			if (!empty($obj) && !empty($obj->last_pay)) {
-				$paymentDate = date('Y-m-d', $this->db->jdate($obj->last_pay));
-			}
-			$this->db->free($resql);
-		}
+		$paymentDate = $this->getLastPaymentDate($facture->id, 'paiement_facture', 'fk_facture');
 
 		$amounts = LemonSuperPDPTransmission::buildAmountsByVatRate($facture, $paymentDate);
 		$details = array(array('amounts' => $amounts));
