@@ -141,6 +141,64 @@ class LemonSuperPDPCron
 	}
 
 	/**
+	 * Synchronise les factures fournisseurs reçues (direction=in) :
+	 * polling avec curseur LEMONSUPERPDP_LAST_IN_ID, création des
+	 * FactureFournisseur brouillon pour les tiers résolus, quarantaine sinon.
+	 *
+	 * Déclaration de la tâche Dolibarr :
+	 *   Classe  : LemonSuperPDPCron
+	 *   Fichier : /lemonsuperpdp/class/lemonsuperpdp_cron.class.php
+	 *   Méthode : syncIncoming
+	 *
+	 * @param string $param  Paramètre libre (non utilisé)
+	 * @return int           0 = succès, <0 = erreur
+	 */
+	public function syncIncoming($param = '')
+	{
+		global $user;
+
+		$this->output = '';
+		$this->error = '';
+
+		if (!isModEnabled('lemonsuperpdp')) {
+			$this->output = 'Module lemonsuperpdp désactivé';
+			return 0;
+		}
+		if (!getDolGlobalInt('LEMONSUPERPDP_ENABLED')) {
+			$this->output = 'LEMONSUPERPDP_ENABLED=0';
+			return 0;
+		}
+		if (!getDolGlobalInt('LEMONSUPERPDP_IN_ENABLED')) {
+			$this->output = 'Réception désactivée (LEMONSUPERPDP_IN_ENABLED=0)';
+			return 0;
+		}
+		if (!isModEnabled('supplier_invoice') && !isModEnabled('fournisseur')) {
+			$this->output = 'Module Fournisseurs/Factures fournisseurs désactivé';
+			return 0;
+		}
+
+		if (empty($user) || empty($user->id)) {
+			require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+			$user = new User($this->db);
+			$user->fetch(1);
+		}
+
+		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+		dol_include_once('/lemonsuperpdp/class/reception.class.php');
+
+		try {
+			$res = LemonSuperPDPReception::syncIncoming($this->db, $user);
+			$this->output = $res['fetched'].' facture(s) reçue(s), '.$res['imported'].' importée(s) en brouillon, '
+				.$res['quarantined'].' en quarantaine, '.$res['errors'].' erreur(s), dernier id = '.$res['lastId'];
+			return ($res['errors'] > 0) ? -1 : 0;
+		} catch (Exception $e) {
+			$this->error = $e->getMessage();
+			dol_syslog('LemonSuperPDPCron::syncIncoming : '.$e->getMessage(), LOG_ERR);
+			return -1;
+		}
+	}
+
+	/**
 	 * Pour chaque transmission en paramètre, recalcule le status local à
 	 * partir de son event le plus récent.
 	 *

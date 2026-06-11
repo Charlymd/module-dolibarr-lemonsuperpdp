@@ -47,6 +47,7 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	$clientId = trim(GETPOST('LEMONSUPERPDP_CLIENT_ID', 'alphanohtml'));
 	$clientSecret = trim(GETPOST('LEMONSUPERPDP_CLIENT_SECRET', 'alphanohtml'));
 	$format = GETPOST('LEMONSUPERPDP_FORMAT', 'alpha');
+	$inEnabled = GETPOSTINT('LEMONSUPERPDP_IN_ENABLED');
 	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 	$sandboxMode = GETPOSTINT('LEMONSUPERPDP_SANDBOX_MODE');
 	// >>> FIN SANDBOX MODE <<<
@@ -81,6 +82,9 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		}
 	}
 	if (dolibarr_set_const($db, 'LEMONSUPERPDP_FORMAT', $format, 'chaine', 0, '', $conf->entity) < 0) {
+		$error++;
+	}
+	if (dolibarr_set_const($db, 'LEMONSUPERPDP_IN_ENABLED', $inEnabled, 'int', 0, '', $conf->entity) < 0) {
 		$error++;
 	}
 	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
@@ -246,6 +250,22 @@ print '<option value="ubl"'.($currentFormat == 'ubl' ? ' selected' : '').'>UBL F
 print '<option value="cii"'.($currentFormat == 'cii' ? ' selected' : '').'>CII France (XML)</option>';
 print '</select>';
 print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPFormatHelp", DOL_URL_ROOT).'</span>';
+print '</td>';
+print '</tr>';
+
+// Réception des factures fournisseurs (direction=in)
+print '<tr class="oddeven">';
+print '<td>'.$langs->trans("LemonSuperPDPInEnabled").'</td>';
+print '<td>';
+$inCurrent = getDolGlobalInt('LEMONSUPERPDP_IN_ENABLED');
+print '<select name="LEMONSUPERPDP_IN_ENABLED" class="flat">';
+print '<option value="0"'.(!$inCurrent ? ' selected' : '').'>'.$langs->trans("No").'</option>';
+print '<option value="1"'.($inCurrent ? ' selected' : '').'>'.$langs->trans("Yes").'</option>';
+print '</select>';
+print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPInEnabledHelp").'</span>';
+if ($inCurrent) {
+	print '<br><a href="'.dol_buildpath('/lemonsuperpdp/reception_list.php', 1).'">'.$langs->trans("LemonSuperPDPRecListTitle").'</a>';
+}
 print '</td>';
 print '</tr>';
 

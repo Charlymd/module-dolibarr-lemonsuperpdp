@@ -1,14 +1,16 @@
 # LemonSuperPDP
 
-Module Dolibarr pour la transmission des factures électroniques via la **Plateforme Agréée SUPER PDP** (https://www.superpdp.tech).
+Module Dolibarr pour l'**émission et la réception** des factures électroniques via la **Plateforme Agréée SUPER PDP** (https://www.superpdp.tech).
 
-Complément du module [LemonFacturX](https://github.com/hello-lemon/module-dolibarr-lemonfacturx) : là où LemonFacturX s'occupe du **format** (génération PDF/A-3 + XML EN16931 embarqué), LemonSuperPDP s'occupe du **transport** (envoi via l'API de la PA officielle DGFiP, synchronisation des statuts de cycle de vie).
+Complément du module [LemonFacturX](https://github.com/hello-lemon/module-dolibarr-lemonfacturx) : là où LemonFacturX s'occupe du **format** (génération PDF/A-3 + XML EN16931 embarqué), LemonSuperPDP s'occupe du **transport** dans les deux sens — envoi des factures clients via l'API de la PA, synchronisation des statuts de cycle de vie, et import des factures fournisseurs reçues sur la plateforme en factures fournisseurs Dolibarr brouillon.
 
 Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et communication à Clermont-Ferrand, spécialisée dans Dolibarr, WordPress et la facturation électronique.
 
 ## Statut
 
-Version 0.3.0 — phase pilote SUPER PDP. Fonctionnalités :
+Version 0.4.0 — phase pilote SUPER PDP. Fonctionnalités :
+
+- **Réception des factures fournisseurs** (nouveau) : polling de l'API (`direction=in`), rattachement automatique du tiers par SIREN/SIRET, création de la facture fournisseur Dolibarr **en brouillon** (jamais auto-validée) avec lignes, remises/frais de pied de document et fichier original (PDF Factur-X ou XML) attaché ; écran « Factur-X reçues » avec quarantaine pour les tiers introuvables ou ambigus et les devises étrangères
 
 - Authentification OAuth 2.1 `client_credentials` avec rafraîchissement automatique du token
 - Page de configuration avec test de connexion et diagnostic complet
@@ -128,6 +130,18 @@ Le menu déroulant **Envoyer un statut** propose les codes AFNOR `fr:204` à `fr
 
 Le statut `fr:212` (encaissée) est également envoyé automatiquement par le trigger `BILL_PAYED` quand vous validez un paiement dans Dolibarr.
 
+### Recevoir les factures fournisseurs
+
+1. Activer **Réception des factures fournisseurs** dans la configuration du module (désactivée par défaut)
+2. La tâche planifiée **Sync factures reçues SUPER PDP** (créée à l'activation du module, toutes les 15 minutes) interroge `GET /v1.beta/invoices?direction=in` et traite chaque nouvelle facture :
+   - tiers résolu par SIREN/SIRET (`idprof1`/`idprof2`) → **facture fournisseur brouillon** créée avec ses lignes, et le fichier original (PDF Factur-X ou XML) attaché à la facture
+   - tiers introuvable ou plusieurs correspondances → **quarantaine**
+   - devise différente de celle de l'instance → **quarantaine** (saisie manuelle)
+3. L'écran **Facturation > Factures fournisseurs > Factur-X reçues (SUPER PDP)** liste tout : bouton **Synchroniser maintenant**, choix du tiers et import pour les quarantaines, écarter/réintégrer une facture
+4. La facture importée reste un **brouillon** : vérification humaine puis validation dans Dolibarr, comme une saisie manuelle
+
+> **Mise à jour depuis une version < 0.4.0** : désactiver puis réactiver le module pour créer la table `llx_lemonsuperpdp_reception`, les nouvelles permissions, l'entrée de menu et la tâche planifiée. La désactivation ne supprime aucune donnée.
+
 ## Diagnostic et dépannage
 
 ### Page de diagnostic
@@ -184,7 +198,7 @@ lemonsuperpdp/
 Le module consomme l'API documentée ici : https://www.superpdp.tech/documentation
 
 - Authentification : OAuth 2.1 `client_credentials` sur `/oauth2/token`
-- Endpoints utilisés : `/v1.beta/companies/me`, `/v1.beta/invoices`, `/v1.beta/invoice_events`, `/v1.beta/invoices/{id}` (expand `invoice_events`)
+- Endpoints utilisés : `/v1.beta/companies/me`, `/v1.beta/invoices` (envoi, et liste `direction=in` avec expand `en_invoice.*` pour la réception), `/v1.beta/invoices/{id}/download`, `/v1.beta/invoice_events`, `/v1.beta/invoices/{id}` (expand `invoice_events`)
 - Synchronisation des événements : polling avec `starting_after_id` (la doc ne prévoit pas de webhook)
 - La réponse `/v1.beta/companies/me` expose le SIREN dans le champ `number` quand `number_scheme == "fr_siren"`, et l'environnement de l'application dans le champ `env` (`production` ou `sandbox`)
 
@@ -207,6 +221,8 @@ Le module consomme l'API documentée ici : https://www.superpdp.tech/documentati
 | `LEMONSUPERPDP_FORMAT` | string | `facturx` | Format d'envoi (`facturx`, `ubl`, `cii`) |
 | `LEMONSUPERPDP_ACCESS_TOKEN` | string | (vide) | Cache du token OAuth (JSON `{access_token, expires_at}`) |
 | `LEMONSUPERPDP_LAST_EVENT_ID` | string | `0` | Dernier `invoice_event` synchronisé (pagination cron) |
+| `LEMONSUPERPDP_IN_ENABLED` | int | 0 | Activer la réception des factures fournisseurs (`direction=in`) |
+| `LEMONSUPERPDP_LAST_IN_ID` | string | `0` | Dernière facture reçue synchronisée (curseur de polling) |
 | `LEMONSUPERPDP_OAUTH_SIREN` | string | (vide) | SIREN de l'application OAuth, mémorisé au dernier "Tester la connexion" réussi pour la cohérence du diagnostic |
 | `LEMONSUPERPDP_OAUTH_SIREN_AT` | string | `0` | Timestamp du dernier rafraîchissement de `LEMONSUPERPDP_OAUTH_SIREN` |
 | `LEMONSUPERPDP_SANDBOX_MODE` | int | 0 | Mode sandbox phase pilote : remplace le SIREN émetteur par `idprof6` avant envoi (à désactiver en prod) |

@@ -180,6 +180,67 @@ class SuperPDPClient
 	}
 
 	/**
+	 * Liste les factures reçues (direction=in) postérieures à un id donné,
+	 * avec le modèle EN16931 structuré (en_invoice) déjà parsé par la PA.
+	 *
+	 * @param int $startingAfterId  Curseur de pagination (0 = depuis le début)
+	 * @return array                Réponse brute contenant data[], count et has_after
+	 * @throws SuperPDPException
+	 */
+	public function listIncomingInvoices($startingAfterId = 0)
+	{
+		$expand = array(
+			'en_invoice',
+			'en_invoice.seller',
+			'en_invoice.buyer',
+			'en_invoice.lines',
+			'en_invoice.vat_break_down',
+			'en_invoice.document_level_allowances',
+			'en_invoice.document_level_charges',
+			'en_invoice.payment_instructions',
+		);
+		$qs = 'direction=in&order=asc&starting_after_id='.((int) $startingAfterId);
+		foreach ($expand as $e) {
+			$qs .= '&expand[]='.urlencode($e);
+		}
+		return $this->request('GET', '/v1.beta/invoices?'.$qs);
+	}
+
+	/**
+	 * Télécharge le fichier brut d'une facture (PDF Factur-X ou XML).
+	 * Le format se détecte sur le contenu retourné (magic bytes %PDF).
+	 *
+	 * @param int $superpdpId
+	 * @return string  Contenu binaire du fichier
+	 * @throws SuperPDPException
+	 */
+	public function downloadInvoice($superpdpId)
+	{
+		$token = $this->getAccessToken();
+		$url = $this->endpoint.'/v1.beta/invoices/'.((int) $superpdpId).'/download';
+
+		dol_syslog('SuperPDPClient::downloadInvoice GET '.$url, LOG_DEBUG);
+
+		$call = $this->httpCall('GET', $url, null, array(
+			'Authorization: Bearer '.$token,
+			'Accept: application/pdf, application/xml',
+		), 60);
+
+		if ($call['error']) {
+			throw new SuperPDPException('Erreur réseau : '.$call['error']);
+		}
+		if ($call['httpCode'] < 200 || $call['httpCode'] >= 300) {
+			dol_syslog('SuperPDPClient::downloadInvoice HTTP '.$call['httpCode'], LOG_ERR);
+			throw new SuperPDPException('Erreur API SUPER PDP au téléchargement (HTTP '.$call['httpCode'].')', $call['httpCode'], $call['body']);
+		}
+		if ($call['body'] === '') {
+			throw new SuperPDPException('Fichier vide reçu de l\'API', $call['httpCode']);
+		}
+
+		return $call['body'];
+	}
+
+	/**
 	 * Liste les invoice_events postérieurs à un id donné (pour la synchronisation).
 	 *
 	 * @param int $startingAfterId

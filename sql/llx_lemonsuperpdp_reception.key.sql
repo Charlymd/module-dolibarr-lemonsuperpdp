@@ -1,0 +1,5 @@
+ALTER TABLE llx_lemonsuperpdp_reception ADD UNIQUE INDEX uk_lemonsuperpdp_reception_superpdp_id (superpdp_id);
+ALTER TABLE llx_lemonsuperpdp_reception ADD INDEX idx_lemonsuperpdp_reception_fk_facture_fourn (fk_facture_fourn);
+ALTER TABLE llx_lemonsuperpdp_reception ADD INDEX idx_lemonsuperpdp_reception_fk_soc (fk_soc);
+ALTER TABLE llx_lemonsuperpdp_reception ADD INDEX idx_lemonsuperpdp_reception_status (status);
+ALTER TABLE llx_lemonsuperpdp_reception ADD INDEX idx_lemonsuperpdp_reception_entity (entity);

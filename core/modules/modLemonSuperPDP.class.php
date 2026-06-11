@@ -25,9 +25,9 @@ class modLemonSuperPDP extends DolibarrModules
 		$this->family = "financial";
 		$this->module_position = '91';
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
-		$this->description = "Transmission des factures via la Plateforme Agréée SUPER PDP";
-		$this->descriptionlong = "Envoie les factures clients Factur-X (générées par LemonFacturX) via l'API de la Plateforme Agréée SUPER PDP, et synchronise les statuts de cycle de vie (déposée, acceptée, refusée, encaissée).";
-		$this->version = '0.3.0';
+		$this->description = "Émission et réception des factures électroniques via la Plateforme Agréée SUPER PDP";
+		$this->descriptionlong = "Envoie les factures clients Factur-X (générées par LemonFacturX) via l'API de la Plateforme Agréée SUPER PDP, synchronise les statuts de cycle de vie (déposée, acceptée, refusée, encaissée), et importe les factures fournisseurs reçues sur la plateforme en factures fournisseurs Dolibarr brouillon.";
+		$this->version = '0.4.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'bill';
 		$this->editor_name = 'Lemon';
@@ -63,6 +63,7 @@ class modLemonSuperPDP extends DolibarrModules
 		$this->tables = array(
 			'llx_lemonsuperpdp_transmission',
 			'llx_lemonsuperpdp_event',
+			'llx_lemonsuperpdp_reception',
 		);
 
 		$this->const = array(
@@ -73,6 +74,8 @@ class modLemonSuperPDP extends DolibarrModules
 			array('LEMONSUPERPDP_FORMAT', 'chaine', 'facturx', 'Format d\'envoi par défaut (facturx, ubl, cii)', 1, 'current', 0),
 			array('LEMONSUPERPDP_ACCESS_TOKEN', 'chaine', '', 'Cache du token OAuth 2.1 (JSON)', 1, 'current', 0),
 			array('LEMONSUPERPDP_LAST_EVENT_ID', 'chaine', '0', 'Dernier invoice_event synchronisé', 1, 'current', 0),
+			array('LEMONSUPERPDP_IN_ENABLED', 'int', '0', 'Activer la réception des factures fournisseurs (direction=in)', 1, 'current', 0),
+			array('LEMONSUPERPDP_LAST_IN_ID', 'chaine', '0', 'Dernière facture reçue synchronisée (curseur direction=in)', 1, 'current', 0),
 			// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 			// Voir en-tête de class/actions_lemonsuperpdp.class.php pour le contexte.
 			array('LEMONSUPERPDP_SANDBOX_MODE', 'int', '0', 'Mode sandbox : remplace le SIREN émetteur par celui du champ idprof6 avant envoi', 1, 'current', 0),
@@ -101,6 +104,20 @@ class modLemonSuperPDP extends DolibarrModules
 				'status' => 1,                   // 1 = activé par défaut
 				'test' => '$conf->lemonsuperpdp->enabled',
 			),
+			1 => array(
+				'label' => 'Sync factures reçues SUPER PDP',
+				'jobtype' => 'method',
+				'class' => '/lemonsuperpdp/class/lemonsuperpdp_cron.class.php',
+				'objectname' => 'LemonSuperPDPCron',
+				'method' => 'syncIncoming',
+				'parameters' => '',
+				'comment' => 'Importe les factures fournisseurs reçues sur SUPER PDP (direction=in) en factures fournisseurs Dolibarr brouillon. Ne fait rien tant que LEMONSUPERPDP_IN_ENABLED=0.',
+				'frequency' => 15,
+				'unitfrequency' => 60,
+				'priority' => 51,
+				'status' => 1,
+				'test' => '$conf->lemonsuperpdp->enabled',
+			),
 		);
 
 		$this->rights = array();
@@ -120,6 +137,20 @@ class modLemonSuperPDP extends DolibarrModules
 		$this->rights[$r][5] = 'lire';
 		$r++;
 
+		$this->rights[$r][0] = $this->numero * 100 + 3;
+		$this->rights[$r][1] = 'Consulter les factures reçues via SUPER PDP';
+		$this->rights[$r][3] = 1;
+		$this->rights[$r][4] = 'reception';
+		$this->rights[$r][5] = 'lire';
+		$r++;
+
+		$this->rights[$r][0] = $this->numero * 100 + 4;
+		$this->rights[$r][1] = 'Importer les factures reçues via SUPER PDP';
+		$this->rights[$r][3] = 0;
+		$this->rights[$r][4] = 'reception';
+		$this->rights[$r][5] = 'ecrire';
+		$r++;
+
 		$this->rights[$r][0] = $this->numero * 100 + 91;
 		$this->rights[$r][1] = 'Administrer le module LemonSuperPDP';
 		$this->rights[$r][3] = 0;
@@ -127,7 +158,24 @@ class modLemonSuperPDP extends DolibarrModules
 		$this->rights[$r][5] = '';
 		$r++;
 
+		// Entrée de menu sous Facturation > Factures fournisseurs
 		$this->menu = array();
+		$r = 0;
+		$this->menu[$r] = array(
+			'fk_menu' => 'fk_mainmenu=billing,fk_leftmenu=suppliers_bills',
+			'type' => 'left',
+			'titre' => 'LemonSuperPDPMenuReceived',
+			'mainmenu' => 'billing',
+			'leftmenu' => 'lemonsuperpdp_reception',
+			'url' => '/lemonsuperpdp/reception_list.php',
+			'langs' => 'lemonsuperpdp@lemonsuperpdp',
+			'position' => 1000,
+			'enabled' => 'isModEnabled("lemonsuperpdp")',
+			'perms' => '$user->hasRight("lemonsuperpdp", "reception", "lire")',
+			'target' => '',
+			'user' => 2,
+		);
+		$r++;
 	}
 
 	/**
