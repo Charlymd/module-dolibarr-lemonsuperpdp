@@ -145,6 +145,30 @@ if ($action == 'import' && $id > 0 && $user->hasRight('lemonsuperpdp', 'receptio
 	$action = '';
 }
 
+// Création du tiers fournisseur depuis le payload (enrichi SIRENE si LemonSirene actif) + import
+if ($action == 'createsoc' && $id > 0 && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
+	if (GETPOST('token', 'alpha') != newToken()) {
+		accessforbidden('Bad value for CSRF token');
+	}
+	$rec = new LemonSuperPDPReception($db);
+	if ($rec->fetch($id) > 0 && $rec->status !== LemonSuperPDPReception::STATUS_IMPORTED && empty($rec->fk_soc)) {
+		$socid = $rec->createThirdpartyFromPayload($user);
+		if ($socid > 0) {
+			setEventMessages($langs->trans('LemonSuperPDPRecSocCreated'), null, 'mesgs');
+			$localContent = ($rec->source === LemonSuperPDPReception::SOURCE_MANUAL) ? $rec->getStoredOriginalFileContent() : null;
+			$ret = $rec->importAsSupplierInvoice($user, null, $socid, $localContent);
+			if ($ret > 0) {
+				setEventMessages($langs->trans('LemonSuperPDPRecImported'), null, 'mesgs');
+			} else {
+				setEventMessages($langs->trans('LemonSuperPDPRecImportFailed').($rec->error_message ? ' : '.$rec->error_message : ''), null, 'errors');
+			}
+		} else {
+			setEventMessages($langs->trans('LemonSuperPDPRecSocCreateFailed').($rec->error ? ' : '.$rec->error : ''), null, 'errors');
+		}
+	}
+	$action = '';
+}
+
 // Cycle de vie acheteur : approuver (fr:206) ou refuser (fr:210) une facture reçue
 if (($action == 'accept' || $action == 'refuse') && $id > 0 && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
 	if (GETPOST('token', 'alpha') != newToken()) {
@@ -391,6 +415,10 @@ while ($i < $imax) {
 		print '<div class="nowrap inline-block">';
 		print $form->select_company((int) $obj->fk_soc, 'socid_'.((int) $obj->rowid), 's.fournisseur = 1', 'LemonSuperPDPRecChooseSupplier', 0, 0, array(), 0, 'maxwidth150');
 		print ' <a class="butActionSmall lemonsuperpdp-import" data-recid="'.((int) $obj->rowid).'" href="'.$_SERVER["PHP_SELF"].'?action=import&id='.((int) $obj->rowid).'&token='.newToken().$param.'">'.$langs->trans('LemonSuperPDPRecImport').'</a>';
+		// Pas de tiers résolu mais un nom dans le XML : proposer la création en un clic
+		if (empty($obj->fk_soc) && !empty($obj->supplier_name)) {
+			print ' <a class="butActionSmall" href="'.$_SERVER["PHP_SELF"].'?action=createsoc&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="'.dol_escape_htmltag($langs->trans('LemonSuperPDPRecCreateSocTooltip', dol_escape_htmltag((string) $obj->supplier_name))).'">'.$langs->trans('LemonSuperPDPRecCreateSoc').'</a>';
+		}
 		print '</div> ';
 		if ($obj->status !== LemonSuperPDPReception::STATUS_IGNORED) {
 			print '<a class="editfielda paddingleft" href="'.$_SERVER["PHP_SELF"].'?action=ignore&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="'.dol_escape_htmltag($langs->trans('LemonSuperPDPRecIgnore')).'">'.img_picto($langs->trans('LemonSuperPDPRecIgnore'), 'disable').'</a>';

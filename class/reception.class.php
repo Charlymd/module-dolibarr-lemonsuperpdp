@@ -692,6 +692,93 @@ class LemonSuperPDPReception extends CommonObject
 	}
 
 	/**
+	 * Crée le tiers fournisseur depuis le bloc seller du payload en_invoice
+	 * (nom, SIREN/SIRET, TVA intra, adresse), puis le complète via LemonSirene
+	 * (registre SIRENE data.gouv) si ce module est actif — les données du XML
+	 * gardent la priorité, SIRENE ne remplit que les trous.
+	 *
+	 * @param User $user
+	 * @return int  socid créé, ou -1 ($this->error renseigné)
+	 */
+	public function createThirdpartyFromPayload($user)
+	{
+		require_once DOL_DOCUMENT_ROOT.'/societe/class/societe.class.php';
+
+		$inv = json_decode((string) $this->payload_raw, true);
+		$en = !empty($inv['en_invoice']) && is_array($inv['en_invoice']) ? $inv['en_invoice'] : array();
+		$seller = !empty($en['seller']) && is_array($en['seller']) ? $en['seller'] : array();
+		$addr = !empty($seller['postal_address']) && is_array($seller['postal_address']) ? $seller['postal_address'] : array();
+
+		$name = !empty($this->supplier_name) ? $this->supplier_name : (string) ($seller['name'] ?? '');
+		if (trim($name) === '') {
+			$this->error = 'Nom du fournisseur absent du payload';
+			return -1;
+		}
+
+		$soc = new Societe($this->db);
+		$soc->name = $name;
+		$soc->fournisseur = 1;
+		$soc->client = 0;
+		$soc->status = 1;
+		$soc->code_client = -1;
+		$soc->code_fournisseur = -1;
+
+		$addressLines = array_filter(array(
+			(string) ($addr['address_line1'] ?? ''),
+			(string) ($addr['address_line2'] ?? ''),
+			(string) ($addr['address_line3'] ?? ''),
+		), function ($l) {
+			return trim($l) !== '';
+		});
+		$soc->address = implode("\n", $addressLines);
+		$soc->zip = (string) ($addr['post_code'] ?? '');
+		$soc->town = (string) ($addr['city'] ?? '');
+		$countryCode = strtoupper((string) ($addr['country_code'] ?? 'FR'));
+		$countryId = (int) dol_getIdFromCode($this->db, $countryCode, 'c_country', 'code', 'rowid');
+		if ($countryId > 0) {
+			$soc->country_id = $countryId;
+			$soc->country_code = $countryCode;
+		}
+
+		if (!empty($this->supplier_siren) && $countryCode === 'FR') {
+			$soc->idprof1 = $this->supplier_siren;
+			$legalId = preg_replace('/[^0-9]/', '', (string) ($seller['legal_registration_identifier']['value'] ?? ''));
+			if (strlen($legalId) === 14) {
+				$soc->idprof2 = $legalId;
+			}
+		}
+		if (!empty($this->supplier_vat)) {
+			$soc->tva_intra = $this->supplier_vat;
+		}
+
+		// Enrichissement SIRENE : complète NAF, sigle, SIRET du siège, adresse
+		// manquante... sans écraser ce que le XML a déjà fourni.
+		if (isModEnabled('lemonsirene') && !empty($this->supplier_siren) && $countryCode === 'FR') {
+			dol_include_once('/lemonsirene/class/lemonsirene.class.php');
+			if (class_exists('LemonSirene')) {
+				try {
+					$sireneData = LemonSirene::getBySiren($this->supplier_siren);
+					if (is_array($sireneData)) {
+						LemonSirene::applyToSociete($soc, $sireneData, false);
+					}
+				} catch (Exception $e) {
+					dol_syslog('LemonSuperPDPReception::createThirdpartyFromPayload enrichissement SIRENE : '.$e->getMessage(), LOG_WARNING);
+				}
+			}
+		}
+
+		$socid = $soc->create($user);
+		if ($socid <= 0) {
+			$this->error = 'Création du tiers : '.$soc->error.(!empty($soc->errors) ? ' '.implode(', ', $soc->errors) : '');
+			dol_syslog('LemonSuperPDPReception::createThirdpartyFromPayload : '.$this->error, LOG_ERR);
+			return -1;
+		}
+
+		dol_syslog('LemonSuperPDPReception::createThirdpartyFromPayload tiers '.$socid.' créé ('.$name.')', LOG_INFO);
+		return $socid;
+	}
+
+	/**
 	 * Émet un statut de cycle de vie côté acheteur (fr:205 prise en charge,
 	 * fr:206 approuvée, fr:210 refusée, fr:209 paiement transmis...) pour
 	 * cette facture reçue, et le trace dans l'agenda de la facture fournisseur.

@@ -179,3 +179,9 @@ LemonSuperPDPEreportingRetry = Retenter cette déclaration
 LemonSuperPDPEreportingStatusPending = En attente
 LemonSuperPDPEreportingStatusSent = Transmise
 LemonSuperPDPEreportingStatusError = Refusée
+
+# v1.1 — création du tiers depuis le payload
+LemonSuperPDPRecCreateSoc = Créer le tiers et importer
+LemonSuperPDPRecCreateSocTooltip = Crée le tiers fournisseur « %s » depuis les données de la facture (nom, SIREN/SIRET, TVA intra, adresse), complété via le registre SIRENE si le module LemonSirene est actif, puis importe la facture en brouillon
+LemonSuperPDPRecSocCreated = Tiers fournisseur créé depuis les données de la facture
+LemonSuperPDPRecSocCreateFailed = Échec de la création du tiers

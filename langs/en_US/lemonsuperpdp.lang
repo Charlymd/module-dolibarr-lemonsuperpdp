@@ -168,3 +168,9 @@ LemonSuperPDPEreportingRetry = Retry this declaration
 LemonSuperPDPEreportingStatusPending = Pending
 LemonSuperPDPEreportingStatusSent = Sent
 LemonSuperPDPEreportingStatusError = Rejected
+
+# v1.1 — third party creation from payload
+LemonSuperPDPRecCreateSoc = Create third party and import
+LemonSuperPDPRecCreateSocTooltip = Creates the supplier third party "%s" from the invoice data (name, SIREN/SIRET, VAT number, address), completed from the SIRENE register if the LemonSirene module is enabled, then imports the invoice as draft
+LemonSuperPDPRecSocCreated = Supplier third party created from invoice data
+LemonSuperPDPRecSocCreateFailed = Third party creation failed
