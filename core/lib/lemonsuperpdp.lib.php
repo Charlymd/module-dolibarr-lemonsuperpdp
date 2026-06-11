@@ -75,3 +75,27 @@ function lemonsuperpdp_check_latest_release($db, $currentVersion)
 	}
 	return null;
 }
+
+/**
+ * Vrai si le tiers est hors champ de l'e-invoicing B2B (réforme 2026-2027) :
+ * particulier (typent 8) OU non assujetti à la TVA (champ « Assujetti à la
+ * TVA » de la fiche tiers). Ces tiers relèvent de l'e-reporting, pas de la
+ * facturation électronique entre assujettis.
+ *
+ * Le typent seul ne suffit pas (une association non assujettie n'est pas un
+ * « Particulier ») et le tva_assuj seul non plus (souvent laissé par défaut) :
+ * on combine les deux.
+ *
+ * @param Societe|null $thirdparty  Tiers Dolibarr (fetch déjà fait)
+ * @return bool
+ */
+function lemonsuperpdp_is_non_assujetti($thirdparty)
+{
+	if (empty($thirdparty)) {
+		return false;
+	}
+	if ((int) ($thirdparty->typent_id ?? 0) === 8) {
+		return true;
+	}
+	return isset($thirdparty->tva_assuj) && (int) $thirdparty->tva_assuj === 0;
+}

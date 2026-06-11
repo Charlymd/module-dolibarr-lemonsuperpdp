@@ -172,12 +172,14 @@ class ActionsLemonSuperPDP
 			}
 
 			// La facturation électronique B2B (réforme 2026-2027) ne concerne pas les
-			// factures aux particuliers : on bloque l'envoi avec un message explicite.
-			// fk_typent = 8 = Particulier dans la table llx_c_typent.
+			// non-assujettis (particuliers, associations non assujetties...) : on
+			// bloque l'envoi avec un message explicite. Ces factures relèvent de
+			// l'e-reporting.
 			if (empty($object->thirdparty)) {
 				$object->fetch_thirdparty();
 			}
-			$isPrivateCustomer = (!empty($object->thirdparty) && (int) ($object->thirdparty->typent_id ?? 0) === 8);
+			require_once dol_buildpath('/lemonsuperpdp/core/lib/lemonsuperpdp.lib.php');
+			$isPrivateCustomer = lemonsuperpdp_is_non_assujetti($object->thirdparty);
 
 			$canSend = ((int) $object->statut) >= 1;
 			$url = $_SERVER['PHP_SELF'].'?action=dosendsuperpdp&id='.((int) $object->id).'&token='.newToken();
@@ -560,13 +562,16 @@ document.getElementById("lemonsuperpdp_send_status").addEventListener("click", f
 			return array('outcome' => 'skipped-draft', 'message' => $langs->trans('LemonSuperPDPSendInvoiceDraft'));
 		}
 
-		// Bloque les factures B2C : la facturation électronique réformée ne s'applique
-		// qu'au B2B. Garde-fou serveur en plus du bouton grisé côté UI, pour résister
-		// à un POST forgé directement sur l'URL d'envoi.
+		// Bloque les factures aux non-assujettis (particuliers, associations non
+		// assujetties...) : la facturation électronique réformée ne s'applique
+		// qu'entre assujettis, ces factures relèvent de l'e-reporting. Garde-fou
+		// serveur en plus du bouton grisé côté UI, pour résister à un POST forgé
+		// directement sur l'URL d'envoi.
 		if (empty($facture->thirdparty)) {
 			$facture->fetch_thirdparty();
 		}
-		if (!empty($facture->thirdparty) && (int) ($facture->thirdparty->typent_id ?? 0) === 8) {
+		require_once dol_buildpath('/lemonsuperpdp/core/lib/lemonsuperpdp.lib.php');
+		if (lemonsuperpdp_is_non_assujetti($facture->thirdparty)) {
 			return array('outcome' => 'skipped-b2c', 'message' => $langs->trans('LemonSuperPDPSendInvoiceB2COnly'));
 		}
 

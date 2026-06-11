@@ -108,15 +108,17 @@ class LemonSuperPDPEreporting extends CommonObject
 	}
 
 	/**
-	 * Vrai si la facture est B2C : tiers de type « Particulier » (typent
-	 * TE_PRIVATE, id 8 dans le dictionnaire standard).
+	 * Vrai si la facture relève de l'e-reporting : tiers non assujetti à la
+	 * TVA, qu'il soit particulier (typent 8) ou personne morale non assujettie
+	 * (association...). Critère partagé avec le blocage d'envoi e-invoicing.
 	 */
 	public static function isB2CInvoice($facture)
 	{
 		if (empty($facture->thirdparty)) {
 			$facture->fetch_thirdparty();
 		}
-		return !empty($facture->thirdparty) && (int) ($facture->thirdparty->typent_id ?? 0) === 8;
+		require_once dol_buildpath('/lemonsuperpdp/core/lib/lemonsuperpdp.lib.php');
+		return lemonsuperpdp_is_non_assujetti($facture->thirdparty);
 	}
 
 	/**

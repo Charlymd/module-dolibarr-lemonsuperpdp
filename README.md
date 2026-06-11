@@ -8,18 +8,18 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Statut
 
-Version 1.0.0 — phase pilote SUPER PDP. Fonctionnalités :
+Version 1.0.1 — phase pilote SUPER PDP. Fonctionnalités :
 
 - **Réception des factures fournisseurs** : polling de l'API (`direction=in`), rattachement automatique du tiers par SIREN/SIRET, création de la facture fournisseur Dolibarr **en brouillon** (jamais auto-validée) avec lignes, remises/frais de pied de document et fichier original (PDF Factur-X ou XML) attaché ; écran « Factur-X reçues » avec quarantaine pour les tiers introuvables ou ambigus et les devises étrangères
 - **Import manuel** d'un fichier Factur-X (PDF) ou XML (CII/UBL) reçu hors plateforme (par mail pendant la transition) : conversion par l'API SUPER PDP, même pipeline que le polling
 - **Cycle de vie côté acheteur** : Approuver (fr:206) / Refuser (fr:210) depuis l'écran des factures reçues, et fr:209 (Paiement transmis) envoyé automatiquement au paiement de la facture fournisseur
 - **Pre-check annuaire** : avant chaque envoi, vérification que le destinataire a une adresse électronique active dans l'annuaire des Plateformes Agréées, avec un message clair sinon (au lieu du rejet cryptique de la plateforme)
-- **E-reporting B2C** : à la validation et au paiement des factures clients « Particulier », mise en file des données de transactions (codes Z12-012 TLB1/TPS1/TNT1, ventilation par taux de TVA) et de paiements, transmises par lots à SUPER PDP qui agrège et déclare au PPF ; écran de suivi de la file avec relance des refusées
+- **E-reporting B2C** : à la validation et au paiement des factures clients non assujettis à la TVA (particuliers, associations non assujetties...), mise en file des données de transactions (codes Z12-012 TLB1/TPS1/TNT1, ventilation par taux de TVA) et de paiements, transmises par lots à SUPER PDP qui agrège et déclare au PPF ; écran de suivi de la file avec relance des refusées
 
 - Authentification OAuth 2.1 `client_credentials` avec rafraîchissement automatique du token
 - Page de configuration avec test de connexion et diagnostic complet
 - Vérification de la cohérence du SIREN Dolibarr ↔ SIREN de l'application OAuth (les factures émises avec un SIREN incohérent sont rejetées par la PA)
-- Bouton "Envoyer via SUPER PDP" sur la fiche facture, grisé automatiquement quand le client est un particulier (les factures B2C ne sont pas concernées par la réforme)
+- Bouton "Envoyer via SUPER PDP" sur la fiche facture, grisé automatiquement quand le client est un non-assujetti à la TVA — particulier (type de tiers « Particulier ») ou personne morale non assujettie comme une association (champ « Assujetti à la TVA » à Non) : ces factures relèvent de l'e-reporting, pas de la facturation électronique B2B
 - Envoi en masse depuis la liste des factures
 - Suivi des statuts de cycle de vie (déposée, acceptée, refusée, encaissée) dans une table d'événements
 - Bouton "Rafraîchir" pour synchroniser à la demande, et cron `cron_sync_events.php` pour la synchronisation périodique
@@ -113,7 +113,7 @@ Le bouton est **grisé** dans les cas suivants, avec un message au survol :
 | État | Message |
 |---|---|
 | Facture en brouillon | "La facture doit être validée avant d'être transmise" |
-| Client = particulier (`typent_id=8`) | "Le client est un particulier. La facturation électronique B2B ne concerne pas les factures aux particuliers." |
+| Client non assujetti à la TVA (type « Particulier », ou « Assujetti à la TVA » à Non) | "Le client est un non-assujetti à la TVA. La facturation électronique B2B ne concerne que les factures entre assujettis : cette facture relève de l'e-reporting." |
 | Facture déjà transmise avec succès | Le bouton n'apparaît pas, le bloc latéral affiche l'état de la transmission |
 
 ### Envoyer en masse
