@@ -1,187 +1,62 @@
-# Module LemonSuperPDP - Traductions françaises
+# French translation for LemonSuperPDP module
+# Copyright (C) 2026 SASU LEMON <https://hellolemon.fr>
+#
+# Transmission SUPER PDP
+LemonSuperPDPAlreadySent=Déjà transmise avec succès
+LemonSuperPDPSendInvoice=Envoyer via SUPER PDP
+LemonSuperPDPSendInvoiceTooltip=Envoyer cette facture via la Plateforme Agréée SUPER PDP
+LemonSuperPDPSendInvoiceDraft=La facture doit être validée avant envoi
+LemonSuperPDPSendInvoiceB2COnly=Client non-assujetti (particulier). La facturation électronique B2B ne concerne pas cette facture.
+LemonSuperPDPSendSuccess=Facture transmise avec succès à SUPER PDP
+LemonSuperPDPSendError=Erreur lors de la transmission à SUPER PDP
+LemonSuperPDPSendSelected=Envoyer via SUPER PDP
+LemonSuperPDPBulkResult=%s transmise(s) avec succès, %s échec(s), %s ignorée(s)
+LemonSuperPDPPdfNotFound=PDF Factur-X introuvable. Générez le PDF de la facture avant d'envoyer.
+LemonSuperPDPCreateError=Erreur lors de la création de la ligne de transmission
+LemonSuperPDPRecoveredExisting=Facture déjà présente sur SUPER PDP (ID %s). Transmission locale mise à jour.
+LemonSuperPDPNotRoutable=Le destinataire (SIREN %s) n'a pas d'adresse active dans l'annuaire des Plateformes Agréées.
 
-Module210009Name = LemonSuperPDP
-Module210009Desc = Transmission des factures via la Plateforme Agréée SUPER PDP
+# Rafraîchissement des events
+LemonSuperPDPRefreshStatus=Rafraîchir les statuts depuis SUPER PDP
+LemonSuperPDPRefreshDone=%s événement(s) synchronisé(s) depuis SUPER PDP
+LemonSuperPDPRefreshError=Erreur lors du rafraîchissement des statuts
 
-# Permissions
-Permission21000901 = Envoyer une facture via SUPER PDP
-Permission21000902 = Consulter les transmissions SUPER PDP
-Permission21000991 = Administrer le module LemonSuperPDP
+# Envoi manuel de statut
+LemonSuperPDPSendStatusPrompt=Choisir un statut à envoyer...
+LemonSuperPDPSendStatusButton=Envoyer le statut sélectionné vers la PA
+LemonSuperPDPSendStatusConfirm=Confirmer l'envoi du statut
+LemonSuperPDPStatusSent=Statut envoyé avec succès
+LemonSuperPDPStatusSendError=Erreur lors de l'envoi du statut
+LemonSuperPDPStatusInvalid=Statut non autorisé
 
-# Setup - en-têtes
-LemonSuperPDPSetup = Configuration LemonSuperPDP
+# Événements
+LemonSuperPDPEventsHistory=Historique des événements de cycle de vie
+LemonSuperPDPEventMessage=Événement
+LemonSuperPDPEventCode=Code
+LemonSuperPDPEventDirection=Direction
+LemonSuperPDPEventDirectionIn=Reçu
+LemonSuperPDPEventDirectionOut=Émis
 
-# Setup - champs
-LemonSuperPDPEnabled = Activer la transmission SUPER PDP
-LemonSuperPDPEndpoint = URL de l'API
-LemonSuperPDPEndpointHelp = <a href="https://api.superpdp.tech" target="_blank" rel="noopener">https://api.superpdp.tech</a> pour la production et le bac à sable.
-LemonSuperPDPClientId = Identifiant OAuth (client_id)
-LemonSuperPDPClientSecret = Secret OAuth (client_secret)
-LemonSuperPDPClientSecretKeep = Laisser tel quel pour conserver la valeur existante
-LemonSuperPDPClientSecretHelp = À récupérer dans l'interface <a href="https://www.superpdp.tech/app" target="_blank" rel="noopener">SUPER PDP</a> : Applications > Nouvelle application. Le secret n'est affiché qu'une seule fois.
-LemonSuperPDPFormat = Format d'envoi par défaut
-LemonSuperPDPFormatHelp = Factur-X recommandé : vous bénéficiez ainsi du PDF lisible généré par <a href="%s/custom/lemonfacturx/admin/setup.php" target="_blank" rel="noopener">LemonFacturX</a> avec le XML CII embarqué.
+# Reset (sandbox)
+LemonSuperPDPResetTransmission=Réinitialiser la transmission
+LemonSuperPDPResetConfirm=Supprimer toutes les transmissions de cette facture ? (réservé au mode sandbox)
+LemonSuperPDPResetDone=%s transmission(s) supprimée(s)
+LemonSuperPDPResetError=Erreur lors de la réinitialisation
 
-# Setup - boutons / actions
-LemonSuperPDPTestConnection = Tester la connexion
-LemonSuperPDPTestSuccess = Connexion SUPER PDP réussie
-LemonSuperPDPTestError = Échec de la connexion SUPER PDP
-LemonSuperPDPTestSirenMatch = SIREN cohérent avec votre société
-LemonSuperPDPTestSirenMismatch = Connexion établie, mais le SIREN de votre société Dolibarr (%s) ne correspond pas au SIREN de l'application OAuth SUPER PDP (%s). Les factures émises seront rejetées par la PA. Corrigez le SIREN dans Accueil > Setup > Société, ou créez une application OAuth pour la bonne entreprise sur SUPER PDP.
-LemonSuperPDPTestSirenLocalMissing = Connexion établie avec l'application OAuth (SIREN %s), mais aucun SIREN n'est renseigné côté Dolibarr (Accueil > Setup > Société). Les factures émises seront rejetées par la PA tant que ce champ n'est pas rempli.
-LemonSuperPDPCompanyName = Dénomination sociale
-LemonSuperPDPInfo = LemonSuperPDP utilise l'API <a href="https://www.superpdp.tech" target="_blank" rel="noopener">SUPER PDP</a> pour transmettre vos factures clients via la Plateforme Agréée. Les identifiants OAuth sont à créer dans votre compte SUPER PDP, section <a href="https://www.superpdp.tech/app" target="_blank" rel="noopener">Applications</a>.
+# Sandbox
+LemonSuperPDPSandboxModeIdProf6Missing=Mode sandbox : le champ "Identifiant professionnel 6" (SIREN sandbox) n'est pas renseigné dans la fiche société.
+LemonSuperPDPSandboxModeSent=mode sandbox
 
-# Diagnostic
-LemonSuperPDPDiagTitle = Diagnostic
-LemonSuperPDPDiagResults = Résultat du diagnostic
-LemonSuperPDPDiagFacturXEnabled = Module <a href="%s/custom/lemonfacturx/admin/setup.php" target="_blank" rel="noopener">LemonFacturX</a> activé
-LemonSuperPDPDiagFacturXDisabled = Module <a href="%s/admin/modules.php" target="_blank" rel="noopener">LemonFacturX</a> requis mais non activé
-LemonSuperPDPDiagCredentialsSet = Identifiants OAuth renseignés
-LemonSuperPDPDiagCredentialsMissing = Identifiants OAuth manquants (client_id et/ou client_secret)
-LemonSuperPDPEndpointMustBeHttps = L'endpoint SUPER PDP doit être en HTTPS (mitigation SSRF)
-LemonSuperPDPDiagSellerSIRET = SIRET de votre société
-LemonSuperPDPDiagSellerSIRETMissing = SIRET de votre société absent (Accueil > Setup > Société)
-LemonSuperPDPDiagSirenMatchOauth = SIREN de votre société cohérent avec l'application OAuth SUPER PDP (%s)
-LemonSuperPDPDiagSirenMismatchOauth = SIREN de votre société (%s) différent du SIREN de l'application OAuth SUPER PDP (%s). Les factures émises seront rejetées par la PA.
-LemonSuperPDPDiagSirenLocalMissing = SIREN de votre société absent. L'application OAuth SUPER PDP attend %s.
-LemonSuperPDPDiagSirenNotTested = Cohérence du SIREN avec l'application OAuth non vérifiée. Cliquez sur "Tester la connexion" pour valider.
-LemonSuperPDPDiagAllOk = Configuration complète, prête à l'emploi
+# Onglet cycle de vie
+LemonSuperPDPLifecycleTab=Cycle de vie
+LemonSuperPDPLifecycleTitle=Cycle de vie
+LemonSuperPDPSeeDetail=Voir le détail complet
+LemonSuperPDPLastMessage=Dernier
+LemonSuperPDPLastMessageLine2=message
+LemonSuperPDPNoEvent=Aucun événement
+LemonSuperPDPProgression=Progression
+LemonSuperPDPOpenTab=Ouvrir l'onglet détail
 
-# Statuts de transmission
-LemonSuperPDPStatusPending = En attente
-LemonSuperPDPStatusSent = Envoyée
-LemonSuperPDPStatusAccepted = Acceptée
-LemonSuperPDPStatusRefused = Refusée
-LemonSuperPDPStatusPaid = Encaissée
-LemonSuperPDPStatusError = Erreur
-
-# Actions
-LemonSuperPDPSendInvoice = Envoyer via SUPER PDP
-LemonSuperPDPSendInvoiceTooltip = Transmettre cette facture via la Plateforme Agréée SUPER PDP
-LemonSuperPDPSendInvoiceDraft = La facture doit être validée avant d'être transmise
-LemonSuperPDPSendInvoiceB2COnly = Le client est un non-assujetti à la TVA (particulier, association non assujettie...). La facturation électronique B2B (réforme 2026-2027) ne concerne que les factures entre assujettis : cette facture relève de l'e-reporting.
-LemonSuperPDPSendSelected = Envoyer via SUPER PDP
-LemonSuperPDPBulkResult = Envoi en masse : %s réussie(s), %s échec(s), %s ignorée(s)
-LemonSuperPDPRefreshStatus = Rafraîchir le statut
-LemonSuperPDPSendSuccess = Facture transmise avec succès à SUPER PDP
-LemonSuperPDPSendError = Échec de la transmission à SUPER PDP
-LemonSuperPDPAlreadySent = Cette facture a déjà été transmise avec succès
-LemonSuperPDPPdfNotFound = PDF de la facture introuvable. Générez le PDF avant d'envoyer
-LemonSuperPDPCreateError = Impossible d'enregistrer la transmission en base
-
-# Fiche facture (bloc latéral)
-LemonSuperPDPTransmissionLabel = Transmission SUPER PDP
-LemonSuperPDPNotTransmitted = Non transmise
-LemonSuperPDPSentOn = Envoyée le
-
-# Historique des événements
-LemonSuperPDPEventsHistory = Historique des événements
-LemonSuperPDPEventMessage = Message
-LemonSuperPDPEventCode = Code
-LemonSuperPDPEventDirection = Sens
-LemonSuperPDPEventDirectionIn = Reçu
-LemonSuperPDPEventDirectionOut = Émis
-
-# Actions events
-LemonSuperPDPRefreshDone = %s nouvel(s) événement(s) récupéré(s) depuis SUPER PDP
-LemonSuperPDPRefreshError = Impossible de rafraîchir les événements
-LemonSuperPDPSendStatusPrompt = Choisir un statut à envoyer…
-LemonSuperPDPSendStatusButton = Envoyer le statut
-LemonSuperPDPSendStatusConfirm = Confirmer l'envoi du statut
-LemonSuperPDPStatusSent = Statut envoyé avec succès
-LemonSuperPDPStatusSendError = Échec de l'envoi du statut
-LemonSuperPDPStatusInvalid = Code de statut invalide
-LemonSuperPDPRecoveredExisting = Facture déjà présente côté SUPER PDP : lien rétabli avec l'ID existant %s
-
-# >>> SANDBOX MODE - À SUPPRIMER APRÈS LA PHASE PILOTE <<<
-# Voir en-tête class/actions_lemonsuperpdp.class.php
-LemonSuperPDPSandboxMode = Mode sandbox (phase pilote)
-LemonSuperPDPSandboxModeHelp = Si activé, le SIREN émetteur de la facture sera remplacé par la valeur du champ <a href="%s/admin/company.php" target="_blank" rel="noopener">Identifiant professionnel 6</a> de votre société avant envoi. Le format d'envoi sera forcé en CII. À désactiver dès que votre SIREN réel est validé côté SUPER PDP.
-LemonSuperPDPSandboxModeActiveWarning = ATTENTION : le SIREN émetteur sera remplacé par %s avant chaque envoi. Ne jamais activer en production.
-LemonSuperPDPSandboxModeIdProf6Missing = Mode sandbox activé mais le champ idprof6 de la société est vide. Renseignez-y le SIREN de substitution dans Accueil > Setup > Société.
-LemonSuperPDPSandboxModeSent = mode sandbox, SIREN remplacé
-LemonSuperPDPResetTransmission = Réinitialiser la transmission
-LemonSuperPDPResetConfirm = Supprimer l'historique de transmission pour cette facture ? Cela permet de la retester.
-LemonSuperPDPResetDone = Transmission réinitialisée (%s ligne(s) supprimée(s))
-LemonSuperPDPResetError = Impossible de réinitialiser la transmission
-# >>> FIN SANDBOX MODE <<<
-
-# Mise à jour et vitrine éditeur (standard Lemon)
-LemonSuperPDPUpdateAvailable = Nouvelle version disponible
-LemonSuperPDPUpdateAvailableMsg = la version %s est disponible sur GitHub (version installée : %s).
-LemonSuperPDPUpdateSeeRelease = Voir les notes de version
-
-LemonSuperPDPAboutTitle = À propos de Lemon
-LemonSuperPDPAboutIntro = Lemon est une agence web et communication à Clermont-Ferrand. Nous développons ce module gratuitement pour la communauté Dolibarr, et nous accompagnons aussi les entreprises sur l'ensemble de leur présence en ligne.
-LemonSuperPDPAboutSvc1Title = Sites web et applications
-LemonSuperPDPAboutSvc1Desc = sites vitrines, e-commerce, applications métier sur mesure
-LemonSuperPDPAboutSvc2Title = Modules Dolibarr sur mesure
-LemonSuperPDPAboutSvc2Desc = CRM, facturation électronique, pointeuse NFC, intégrations API, automatisations
-LemonSuperPDPAboutSvc3Title = Facturation électronique
-LemonSuperPDPAboutSvc3Desc = mise en conformité Factur-X EN16931, raccordement aux Plateformes Agréées, accompagnement réforme 2026-2027
-LemonSuperPDPAboutSvc4Title = IA au service des pros
-LemonSuperPDPAboutSvc4Desc = extraction de factures fournisseurs, rapprochement bancaire, génération de contenus, assistants métier
-LemonSuperPDPAboutSvc5Title = Déploiement et hébergement Dolibarr
-LemonSuperPDPAboutSvc5Desc = installation, migration, paramétrage, formation des équipes
-LemonSuperPDPAboutCTA = Découvrir Lemon sur hellolemon.fr
-LemonSuperPDPAboutLocation = Clermont-Ferrand, France - depuis 2012
-
-# Réception (factures fournisseurs, direction=in)
-LemonSuperPDPInEnabled = Réception des factures fournisseurs
-LemonSuperPDPInEnabledHelp = Importe automatiquement les factures reçues sur SUPER PDP en factures fournisseurs Dolibarr (toujours en brouillon, jamais validées automatiquement). Le tiers est rattaché par SIREN/SIRET ; sans correspondance, la facture reste en quarantaine dans l'écran « Factur-X reçues ».
-LemonSuperPDPMenuReceived = Factur-X reçues (SUPER PDP)
-LemonSuperPDPRecListTitle = Factures reçues via SUPER PDP
-LemonSuperPDPRecSyncNow = Synchroniser maintenant
-LemonSuperPDPRecSyncResult = Synchronisation terminée : %s nouvelle(s) facture(s), %s importée(s) en brouillon, %s en quarantaine, %s erreur(s)
-LemonSuperPDPRecDisabled = La réception est désactivée dans la configuration du module
-LemonSuperPDPRecDisabledHint = La réception des factures fournisseurs est désactivée : activez-la dans la configuration du module pour que la synchronisation (cron et bouton) traite les factures reçues.
-LemonSuperPDPRecDateFetched = Reçue le
-LemonSuperPDPRecNumber = N° facture
-LemonSuperPDPRecChooseSupplier = Choisir le tiers...
-LemonSuperPDPRecImport = Importer
-LemonSuperPDPRecImported = Facture fournisseur créée en brouillon
-LemonSuperPDPRecImportFailed = Échec de l'import
-LemonSuperPDPRecIgnore = Écarter cette facture
-LemonSuperPDPRecUnignore = Réintégrer cette facture
-LemonSuperPDPRecStatusNew = Nouvelle
-LemonSuperPDPRecStatusImported = Importée
-LemonSuperPDPRecStatusQuarantine = Quarantaine
-LemonSuperPDPRecStatusIgnored = Écartée
-LemonSuperPDPRecStatusError = Erreur
-
-# v1.0 — import manuel, cycle de vie acheteur, pre-check annuaire, e-reporting B2C
-LemonSuperPDPRecUploadLabel = Importer un fichier Factur-X (PDF) ou XML (CII/UBL) :
-LemonSuperPDPRecUploadSubmit = Importer le fichier
-LemonSuperPDPRecUploadBadExt = Extension non autorisée (PDF ou XML uniquement)
-LemonSuperPDPRecUploadQuarantined = Fichier converti, mais facture mise en quarantaine
-LemonSuperPDPRecSourceManual = Import manuel
-LemonSuperPDPRecAccept = Approuver
-LemonSuperPDPRecRefuse = Refuser
-LemonSuperPDPRecRefuseConfirm = Envoyer le statut Refusée (fr:210) au fournisseur via la plateforme ?
-LemonSuperPDPRecLifecycleSent = Statut %s transmis à la plateforme
-LemonSuperPDPNotRoutable = Le destinataire (SIREN %s) n'a pas d'adresse électronique active dans l'annuaire des Plateformes Agréées : il ne peut pas recevoir de facture électronique. Vérifiez le SIRET du tiers ou attendez son raccordement à une plateforme.
-LemonSuperPDPPrecheckDirectory = Vérifier l'annuaire avant envoi
-LemonSuperPDPPrecheckDirectoryHelp = Avant chaque envoi, interroge l'annuaire des Plateformes Agréées pour vérifier que le destinataire est joignable, avec un message clair en cas d'échec. Désactivé automatiquement en mode sandbox.
-LemonSuperPDPMenuEreporting = E-reporting B2C (SUPER PDP)
-LemonSuperPDPEreportingEnabled = E-reporting B2C
-LemonSuperPDPEreportingEnabledHelp = À la validation et au paiement des factures clients non assujettis à la TVA (type de tiers « Particulier », ou champ « Assujetti à la TVA » à Non — associations par exemple), met en file les données de transactions et de paiements, transmises ensuite à SUPER PDP qui les agrège et les déclare au PPF selon votre régime de TVA.
-LemonSuperPDPEreportingListTitle = E-reporting B2C via SUPER PDP
-LemonSuperPDPEreportingProcessNow = Transmettre maintenant
-LemonSuperPDPEreportingProcessResult = Transmission terminée : %s déclaration(s) envoyée(s), %s refusée(s), %s à retenter
-LemonSuperPDPEreportingDisabled = L'e-reporting est désactivé dans la configuration du module
-LemonSuperPDPEreportingDisabledHint = L'e-reporting B2C est désactivé : activez-le dans la configuration du module pour que les factures aux particuliers alimentent cette file.
-LemonSuperPDPEreportingTypeTransaction = Transaction
-LemonSuperPDPEreportingTypePayment = Paiement
-LemonSuperPDPEreportingCategory = Catégorie
-LemonSuperPDPEreportingDateSent = Transmis le
-LemonSuperPDPEreportingRetry = Retenter cette déclaration
-LemonSuperPDPEreportingStatusPending = En attente
-LemonSuperPDPEreportingStatusSent = Transmise
-LemonSuperPDPEreportingStatusError = Refusée
-
-# v1.1 — création du tiers depuis le payload
-LemonSuperPDPRecCreateSoc = Créer le tiers et importer
-LemonSuperPDPRecCreateSocTooltip = Crée le tiers fournisseur « %s » depuis les données de la facture (nom, SIREN/SIRET, TVA intra, adresse), complété via le registre SIRENE si le module LemonSirene est actif, puis importe la facture en brouillon
-LemonSuperPDPRecSocCreated = Tiers fournisseur créé depuis les données de la facture
-LemonSuperPDPRecSocCreateFailed = Échec de la création du tiers
+# Menus
+LemonSuperPDPMenuReceived=Factures reçues (SUPER PDP)
+LemonSuperPDPMenuEreporting=E-reporting B2C

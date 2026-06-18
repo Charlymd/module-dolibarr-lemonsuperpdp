@@ -28,6 +28,7 @@ class LemonSuperPDPEvent extends CommonObject
 	public $status_code;
 	public $message;
 	public $direction;           // 'in' ou 'out'
+	public $flux;                // 'fournisseur' | 'pdp' | 'client'
 	public $event_date;
 	public $payload_raw;
 	public $date_creation;
@@ -69,6 +70,7 @@ class LemonSuperPDPEvent extends CommonObject
 		$this->status_code = $obj->status_code;
 		$this->message = $obj->message;
 		$this->direction = $obj->direction;
+		$this->flux = isset($obj->flux) ? $obj->flux : null;
 		$this->event_date = $this->db->jdate($obj->event_date);
 		$this->payload_raw = $obj->payload_raw;
 		$this->date_creation = $this->db->jdate($obj->date_creation);
@@ -82,7 +84,7 @@ class LemonSuperPDPEvent extends CommonObject
 		$now = dol_now();
 
 		$sql = "INSERT INTO ".MAIN_DB_PREFIX."lemonsuperpdp_event (";
-		$sql .= "fk_transmission, entity, superpdp_event_id, status_code, message, direction, event_date, payload_raw, date_creation, fk_user_creat";
+		$sql .= "fk_transmission, entity, superpdp_event_id, status_code, message, direction, flux, event_date, payload_raw, date_creation, fk_user_creat";
 		$sql .= ") VALUES (";
 		$sql .= ((int) $this->fk_transmission);
 		$sql .= ", ".((int) $conf->entity);
@@ -90,6 +92,7 @@ class LemonSuperPDPEvent extends CommonObject
 		$sql .= ", '".$this->db->escape($this->status_code)."'";
 		$sql .= ", ".(!empty($this->message) ? "'".$this->db->escape($this->message)."'" : "NULL");
 		$sql .= ", '".$this->db->escape(!empty($this->direction) ? $this->direction : self::DIRECTION_IN)."'";
+		$sql .= ", ".(!empty($this->flux) ? "'".$this->db->escape($this->flux)."'" : "NULL");
 		$sql .= ", '".$this->db->idate(!empty($this->event_date) ? $this->event_date : $now)."'";
 		$sql .= ", ".(!empty($this->payload_raw) ? "'".$this->db->escape($this->payload_raw)."'" : "NULL");
 		$sql .= ", '".$this->db->idate($now)."'";
@@ -137,6 +140,7 @@ class LemonSuperPDPEvent extends CommonObject
 		$ev->status_code = isset($attrs['status_code']) ? (string) $attrs['status_code'] : '';
 		$ev->message = isset($attrs['message']) ? $attrs['message'] : null;
 		$ev->direction = isset($attrs['direction']) ? $attrs['direction'] : self::DIRECTION_IN;
+		$ev->flux = isset($attrs['flux']) ? $attrs['flux'] : null;
 		$ev->event_date = isset($attrs['event_date']) ? $attrs['event_date'] : dol_now();
 		$ev->payload_raw = isset($attrs['payload_raw']) ? $attrs['payload_raw'] : null;
 
@@ -375,5 +379,70 @@ class LemonSuperPDPEvent extends CommonObject
 			default:
 				return 'badge-status0';   // gris
 		}
+	}
+
+	/**
+	 * Contenu du badge affiché dans l'onglet "Facturation électronique".
+	 * Appelé par complete_head_from_modules() via la déclaration $this->tabs.
+	 * Retourne '<span style="color:COLOR">●</span> N' ou '' si aucun event.
+	 *
+	 * @param  int        $fk_facture  ID de la facture
+	 * @param  mixed      $dummy       Ignoré (signature Dolibarr)
+	 * @return string
+	 */
+	public function getLifecycleBadgeContent($fk_facture, $dummy = null)
+	{
+		$fk_facture = (int) $fk_facture;
+
+		// Nombre d'events + dernier status_code
+		$sql = "SELECT e.status_code"
+		     . " FROM " . MAIN_DB_PREFIX . "lemonsuperpdp_event e"
+		     . " INNER JOIN " . MAIN_DB_PREFIX . "lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission"
+		     . " WHERE t.fk_facture = " . $fk_facture
+		     . " ORDER BY e.event_date DESC, e.rowid DESC";
+		$res = $this->db->query($sql);
+		if (!$res) return '';
+		$count = $this->db->num_rows($res);
+		if ($count === 0) {
+			// Pas d'event : vérifier si la transmission est en erreur
+			$sqlT = "SELECT status FROM " . MAIN_DB_PREFIX . "lemonsuperpdp_transmission"
+			      . " WHERE fk_facture = " . $fk_facture . " ORDER BY rowid DESC LIMIT 1";
+			$resT = $this->db->query($sqlT);
+			if ($resT && $this->db->num_rows($resT) > 0) {
+				$t = $this->db->fetch_object($resT);
+				if ($t->status === 'error') {
+					return '<span style="color:#A32D2D">●</span> 0';
+				}
+			}
+			return '';
+		}
+
+		$lastObj  = $this->db->fetch_object($res);
+		$lastCode = $lastObj ? $lastObj->status_code : '';
+
+		// Erreur de transmission remonte sur le badge
+		$sqlT = "SELECT status FROM " . MAIN_DB_PREFIX . "lemonsuperpdp_transmission"
+		      . " WHERE fk_facture = " . $fk_facture . " ORDER BY rowid DESC LIMIT 1";
+		$resT = $this->db->query($sqlT);
+		if ($resT && $this->db->num_rows($resT) > 0) {
+			$t = $this->db->fetch_object($resT);
+			if ($t->status === 'error') {
+				$lastCode = 'ERROR';
+			}
+		}
+
+		$color = self::_badgeColor($lastCode);
+		return '<span style="color:' . $color . '">&#9679;</span> ' . $count;
+	}
+
+	private static function _badgeColor($code)
+	{
+		if (in_array($code, array('ERROR', 'fr:210', 'REJECT', 'fr:201', 'fr:203'), true)) return '#A32D2D';
+		if ($code === 'fr:211') return '#854F0B';
+		if (in_array($code, array('fr:212', 'fr:206', 'fr:207'), true))              return '#3B6D11';
+		if (in_array($code, array('fr:204', 'fr:205', 'fr:208', 'fr:209',
+		                          'fr:200', 'fr:202', 'ACK', 'ACK-01',
+		                          'ACK-02', 'ROUTE'), true))                          return '#185FA5';
+		return '#888780';
 	}
 }
