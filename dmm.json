@@ -1,0 +1,23 @@
+{
+  "schema_version": "1",
+  "module_id": "lemonsuperpdp",
+  "name": "LemonSuperPDP",
+  "description": "Émission et réception des factures électroniques Factur-X via la Plateforme Agréée SUPER PDP (complément transport de LemonFacturX).",
+  "author": "Lemon",
+  "url": "https://hellolemon.fr",
+  "license": "GPL-3.0-or-later",
+  "repository": "hello-lemon/module-dolibarr-lemonsuperpdp",
+  "branch": "main",
+  "dolibarr_module_id": 210009,
+  "compatibility": {
+    "1.x": {
+      "dolibarr_min": "18.0.0",
+      "dolibarr_max": "22.*",
+      "php_min": "7.4"
+    }
+  },
+  "dependencies": {
+    "modules": ["lemonfacturx"],
+    "php_extensions": ["curl", "json"]
+  }
+}
