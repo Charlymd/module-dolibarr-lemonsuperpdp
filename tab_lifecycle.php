@@ -120,12 +120,42 @@ if (empty($ret) || $ret < 0) {
 $fk = (int) $object->id;
 
 // ── Action POST ──────────────────────────────────────────────────────────────
+if ($action === 'forcesuperpdpsend' && $canWrite) {
+    if (GETPOST('token', 'alpha') !== currentToken()) {
+        setEventMessages('Bad CSRF token', null, 'errors');
+    } else {
+        dol_include_once('/lemonsuperpdp/class/actions_lemonsuperpdp.class.php');
+        $sender = new ActionsLemonSuperPDP($db);
+        $result = $sender->sendOneInvoice($object, $user, true);
+        $msg = !empty($result['message']) ? $result['message'] : '';
+        $style = in_array($result['outcome'], array('ok', 'ok-recovered'), true) ? 'mesgs' : 'errors';
+        if ($result['outcome'] === 'ok-recovered') $style = 'warnings';
+        setEventMessages($msg, null, $style);
+    }
+    header('Location: '.dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1).'?id='.$fk);
+    exit;
+}
+
+if ($action === 'lemonfacturx_verify' && $canRead) {
+    if (GETPOST('token', 'alpha') !== currentToken()) {
+        setEventMessages('Bad CSRF token', null, 'errors');
+    } elseif (isModEnabled('lemonfacturx') && getDolGlobalInt('LEMONFACTURX_ENABLED')) {
+        dol_include_once('/lemonfacturx/class/actions_lemonfacturx.class.php');
+        $lfx = new ActionsLemonFacturX($db);
+        $lfx->verifyInvoicePdf($object);
+    } else {
+        setEventMessages('Module LemonFacturX non activé.', null, 'warnings');
+    }
+    header('Location: '.dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1).'?id='.$fk);
+    exit;
+}
+
 if ($action === 'send_lifecycle_status' && $canWrite) {
-    if (!isset($_SESSION['newtoken']) || GETPOST('token', 'alpha') !== $_SESSION['newtoken']) {
+    if (GETPOST('token', 'alpha') !== currentToken()) {
         setEventMessages('Erreur CSRF.', null, 'errors');
     } else {
         $status_code = GETPOST('lifecycle_status', 'alphanohtml');
-        $allowed_out = lsp_allowed_outgoing(lsp_last_fournisseur_code($db, $fk));
+        $allowed_out = lsp_allowed_outgoing($fk, $db);
         if (!array_key_exists($status_code, $allowed_out)) {
             setEventMessages('Statut non autorisé.', null, 'errors');
         } else {
@@ -139,16 +169,26 @@ if ($action === 'send_lifecycle_status' && $canWrite) {
                         'fk_transmission' => $t->id,
                         'status_code'     => $status_code,
                         'message'         => lsp_label($status_code),
-                        'direction'       => 'out',
-                        'flux'            => 'client',
-                        'seen'            => 1,
+                        'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
                         'event_date'      => dol_now(),
                         'payload_raw'     => json_encode($response),
                     ), $user, $fk);
+                    $mapped = LemonSuperPDPTransmission::mapStatusFromEventCode($status_code);
+                    if ($mapped !== null) {
+                        $t->status = $mapped;
+                    }
                     $t->status_raw = $status_code;
                     $t->update($user);
                     setEventMessages('Statut ' . dol_escape_htmltag($status_code) . ' envoyé.', null, 'mesgs');
                 } catch (Exception $e) {
+                    LemonSuperPDPEvent::createAndLog($db, array(
+                        'fk_transmission' => $t->id,
+                        'status_code'     => $status_code,
+                        'message'         => 'Erreur envoi statut '.$status_code.' : '.$e->getMessage(),
+                        'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
+                        'event_date'      => dol_now(),
+                        'payload_raw'     => $e->getMessage(),
+                    ), $user, $fk);
                     setEventMessages('Erreur : ' . dol_escape_htmltag($e->getMessage()), null, 'errors');
                 }
             } else {
@@ -166,16 +206,18 @@ $transmission->fetchLastByFacture($fk);
 
 // ── Chargement événements ────────────────────────────────────────────────────
 $events_raw = array();
-$sql = 'SELECT e.rowid, e.status_code, e.flux, e.direction, e.event_date, e.message'
+$sql = 'SELECT e.rowid, e.status_code, e.flux, e.direction, e.event_date, e.message, e.payload_raw'
      . ' FROM ' . MAIN_DB_PREFIX . 'lemonsuperpdp_event e'
-     . ' INNER JOIN ' . MAIN_DB_PREFIX . 'lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission'
-     . ' WHERE t.fk_facture = ' . $fk
+     . ' LEFT JOIN ' . MAIN_DB_PREFIX . 'lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission'
+     . ' WHERE COALESCE(t.fk_facture, e.fk_facture) = ' . $fk
+     . ' AND e.entity = ' . ((int) $conf->entity)
      . ' ORDER BY e.event_date ASC, e.rowid ASC';
 $resq = $db->query($sql);
 if ($resq) {
     while ($obj = $db->fetch_object($resq)) {
         $events_raw[] = $obj;
     }
+    $db->free($resq);
 }
 
 // ── Injection event d'erreur de transmission ─────────────────────────────────
@@ -190,8 +232,8 @@ if ($transmission->id > 0
     $errEvt->flux        = 'pdp';
     $errEvt->direction   = 'in';
     $errEvt->message     = $transmission->error_message;
-    // event_date en format DB pour que $db->jdate() fonctionne en aval
-    $errEvt->event_date  = $db->idate($transmission->tms ? $transmission->tms : dol_now());
+    // $transmission->tms est déjà un timestamp Unix (converti par jdate dans _setFromRow)
+    $errEvt->event_date  = $db->idate($transmission->tms ?: dol_now());
     $events_raw[] = $errEvt;
 }
 
@@ -219,12 +261,45 @@ $svg_events = array();
 foreach ($events_raw as $e) {
     $fx      = lsp_flux($e->status_code, isset($e->flux) ? (string) $e->flux : '');
     $msg     = isset($e->message) ? (string) $e->message : '';
-    $tooltip = ($e->status_code === 'ERROR') ? $msg : '';
+    $payload = isset($e->payload_raw) ? (string) $e->payload_raw : '';
+    if ($e->status_code === 'ERROR') {
+        $tooltip = $msg;
+    } elseif ($payload !== '' && (
+        $e->status_code === 'facturx:generated'
+        || ($e->status_code === 'facturx:error')
+        || (isset($e->direction) && $e->direction === 'out' && $e->status_code === 'api:uploaded')
+    )) {
+        $tooltip = $payload;
+    } else {
+        $tooltip = '';
+    }
+    // Sévérité et compte d'avertissements pour les événements Factur-X
+    $warnings_count = 0;
+    if ($e->status_code === 'facturx:error') {
+        $severity = 'error';
+    } elseif ($e->status_code === 'facturx:generated' && $payload !== '') {
+        $severity = 'warning';
+        $lines = explode("\n", $payload);
+        $warnings_count = max(0, count(array_filter(array_slice($lines, 1), 'strlen')));
+    } elseif ($e->status_code === 'facturx:generated') {
+        $severity = 'ok';
+    } else {
+        $severity = '';
+    }
+    // Label court = code (ex. "fr:204"), libellé complet dans le tooltip
+    $fullLabel = lsp_label($e->status_code, $msg);
+    $shortLabel = ($e->status_code === 'ERROR') ? 'Erreur' : $e->status_code;
+    $svgTooltip = $tooltip ?: $fullLabel;
+    if ($msg && $msg !== $fullLabel) {
+        $svgTooltip .= ' — ' . $msg;
+    }
     $svg_events[] = array(
         'code'     => $e->status_code,
         'flux'     => $fx,
-        'label'    => lsp_label($e->status_code, $msg),
-        'tooltip'  => $tooltip,
+        'label'    => $shortLabel,
+        'tooltip'  => $svgTooltip,
+        'severity'       => $severity,
+        'warnings_count' => $warnings_count,
         'date'     => dol_print_date($db->jdate($e->event_date), 'day'),
         'time'     => dol_print_date($db->jdate($e->event_date), 'hour'),
         'seq_from' => lsp_seq_from($e->status_code, $fx),
@@ -234,7 +309,7 @@ foreach ($events_raw as $e) {
     );
 }
 
-$allowed = lsp_allowed_outgoing($fc);
+$allowed = lsp_allowed_outgoing($fk, $db);
 
 // ── Rendu page ───────────────────────────────────────────────────────────────
 if (!function_exists('facture_prepare_head')) {
@@ -277,8 +352,8 @@ print '<div class="fichecenter">';
         'pdp'         => array('label' => 'PDP / PA',    'color' => '#5F5E5A', 'dot' => '#888780'),
         'client'      => array('label' => 'Client',      'color' => '#3B6D11', 'dot' => '#3B6D11'),
     );
-    foreach ($actors as $fk2 => $actor):
-        $evt = $last[$fk2];
+    foreach ($actors as $flux_key => $actor):
+        $evt = $last[$flux_key];
     ?>
     <div style="flex:1;display:flex;flex-direction:column;gap:2px;padding:6px 10px;border-radius:6px;border:1px solid #e0ddd6;background:#fff;">
       <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px;">
@@ -311,6 +386,21 @@ print '<div class="fichecenter">';
   ?>
 
   <!-- Barre d'action -->
+  <?php if ($canRead || $canWrite): ?>
+  <div style="display:flex;align-items:center;gap:8px;padding:8px 0 0;border-top:1px solid #e0ddd6;margin-top:4px;flex-wrap:wrap;">
+    <?php if ($canRead && isModEnabled('lemonfacturx') && getDolGlobalInt('LEMONFACTURX_ENABLED')): ?>
+    <a class="butAction" href="<?php echo dol_escape_htmltag(dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1).'?id='.$fk.'&action=lemonfacturx_verify&token='.newToken()); ?>">
+      Vérifier la Factur-X
+    </a>
+    <?php endif; ?>
+    <?php if ($canWrite && getDolGlobalInt('LEMONSUPERPDP_ENABLED')): ?>
+    <a class="butAction" href="<?php echo dol_escape_htmltag(dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1).'?id='.$fk.'&action=forcesuperpdpsend&token='.newToken()); ?>"
+       onclick="return confirm('<?php echo dol_escape_js($langs->trans('LemonSuperPDPForceResendConfirm')); ?>');">
+      &#x21BA; <?php echo $langs->trans('LemonSuperPDPForceResend'); ?>
+    </a>
+    <?php endif; ?>
+  </div>
+  <?php endif; ?>
   <?php if ($canWrite && !empty($allowed)): ?>
   <div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid #e0ddd6;margin-top:4px;">
     <form method="post" action="<?php echo dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1); ?>?id=<?php echo $fk; ?>"
@@ -346,7 +436,7 @@ function lsp_flux($code, $flux_db = '')
     if (!empty($flux_db) && in_array($flux_db, array('fournisseur', 'pdp', 'client'), true)) {
         return $flux_db;
     }
-    $fournisseur = array('fr:200','fr:201','fr:202','fr:203','fr:204','fr:205');
+    $fournisseur = array('fr:200','fr:201','fr:202','fr:203','fr:204','fr:205','api:uploaded','facturx:generated','facturx:error');
     $pdp         = array('ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR');
     if (in_array($code, $fournisseur, true)) return 'fournisseur';
     if (in_array($code, $pdp, true))         return 'pdp';
@@ -355,17 +445,13 @@ function lsp_flux($code, $flux_db = '')
 
 function lsp_label($code, $override = '')
 {
+    // Cas spéciaux non couverts par LemonSuperPDPEvent::getStatusLabel()
     if ($code === 'ERROR') return 'Erreur';
+    if ($code === 'facturx:generated') return !empty($override) ? $override : 'Factur-X généré';
+    if ($code === 'facturx:error')     return !empty($override) ? $override : 'Erreur génération Factur-X';
     if (!empty($override)) return $override;
-    $map = array(
-        'fr:200'=>'Déposée','fr:201'=>'En cours de traitement','fr:202'=>'Comptabilisée',
-        'fr:203'=>'En attente','fr:204'=>'Mise à disposition','fr:205'=>'Prise en charge',
-        'fr:206'=>'Approuvée','fr:207'=>'Approuvée partiellement','fr:208'=>'Paiement en cours',
-        'fr:209'=>'Paiement transmis','fr:210'=>'Refusée','fr:211'=>'Litige','fr:212'=>'Encaissée',
-        'ACK'=>'Accusé de réception','ACK-01'=>'Accusé réception','ACK-02'=>'Validation format',
-        'REJECT'=>'Rejet technique','ROUTE'=>'Routage confirmé',
-    );
-    return isset($map[$code]) ? $map[$code] : $code;
+    // Délègue à la source de vérité pour les codes AFNOR et ACK/REJECT/ROUTE
+    return LemonSuperPDPEvent::getStatusLabel($code);
 }
 
 function lsp_color($code, $flux = '')
@@ -386,7 +472,8 @@ function lsp_dashed($code)
 
 function lsp_seq_from($code, $flux = '')
 {
-    if ($code === 'ERROR')       return 1;   // part de la colonne PA
+    if ($code === 'facturx:generated' || $code === 'facturx:error') return 0; // pas de flèche
+    if ($code === 'ERROR')       return 1;
     if ($flux === 'fournisseur') return 0;
     if ($flux === 'client')      return 2;
     if (in_array($code, array('ACK','ACK-01','ACK-02','REJECT'), true)) return 1;
@@ -395,90 +482,140 @@ function lsp_seq_from($code, $flux = '')
 
 function lsp_seq_to($code, $flux = '')
 {
-    if ($code === 'ERROR')       return 0;   // flèche retour vers Fournisseur
+    if ($code === 'facturx:generated' || $code === 'facturx:error') return 0; // pas de flèche
+    if ($code === 'ERROR')       return 0;
     if ($flux === 'fournisseur') return 1;
     if ($flux === 'client')      return 1;
+    if ($flux === 'pdp')         return 0;  // PDP → Fournisseur par défaut (ACK, ROUTE…)
     if (in_array($code, array('ACK','ACK-01','ACK-02','REJECT'), true)) return 0;
     return 2;
 }
 
-function lsp_last_fournisseur_code($db, $fk)
+
+function lsp_allowed_outgoing($fk, $db)
 {
-    $sql = 'SELECT e.status_code FROM ' . MAIN_DB_PREFIX . 'lemonsuperpdp_event e'
+    // fr:212 (Encaissée) est le seul statut que le vendeur peut émettre manuellement.
+    // Il est normalement auto-déclenché par le trigger BILL_PAYED ; ce menu sert de secours.
+    // Masqué si fr:212 a déjà été enregistré pour cette facture.
+    global $conf;
+    $sql = 'SELECT e.rowid FROM ' . MAIN_DB_PREFIX . 'lemonsuperpdp_event e'
          . ' INNER JOIN ' . MAIN_DB_PREFIX . 'lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission'
-         . ' WHERE t.fk_facture = ' . (int) $fk
-         . " AND e.status_code IN ('fr:204','fr:205')"
-         . ' ORDER BY e.event_date DESC, e.rowid DESC LIMIT 1';
+         . " WHERE t.fk_facture = " . (int) $fk
+         . " AND t.entity = " . ((int) $conf->entity)
+         . " AND e.status_code = 'fr:212' LIMIT 1";
     $res = $db->query($sql);
     if ($res && $db->num_rows($res) > 0) {
-        return $db->fetch_object($res)->status_code;
+        return array();
     }
-    return '';
-}
-
-function lsp_allowed_outgoing($last_fournisseur = '')
-{
-    // Seuls les statuts fournisseur peuvent être émis manuellement depuis cette interface.
-    // fr:212 (Encaissée) est déclenché automatiquement par le trigger BILL_PAYED.
-    if ($last_fournisseur === 'fr:205') return array();
-    if ($last_fournisseur === 'fr:204') return array('fr:205' => 'Prise en charge');
-    return array('fr:204' => 'Mise à disposition');
+    return array('fr:212' => 'Encaissée');
 }
 
 function lsp_render_svg(array $events)
 {
-    $row_h = 55; $top = 44; $bot = 40;
-    $n = count($events);
+    $row_h = 44;
+    $top   = 44;
+    $bot   = 40;
+    $n     = count($events);
     if ($n === 0) return '';
-    $h = $top + $n * $row_h + $bot;
+
+    $h  = $top + $n * $row_h + $bot;
     $cx = array(0 => 288, 1 => 450, 2 => 610);
 
-    $o  = '<svg width="100%" viewBox="0 0 660 ' . $h . '" style="display:block;margin:8px 0;">';
+    // Couleur de pastille selon sévérité Factur-X
+    $severity_colors = array(
+        'ok'      => '#3B6D11',   // vert
+        'warning' => '#D97706',   // orange
+        'error'   => '#A32D2D',   // rouge
+    );
+
+    $o  = '<svg width="100%" viewBox="0 0 660 '.$h.'" style="display:block;margin:8px 0;">';
     $o .= '<defs><marker id="lcA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
         . '<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
         . '</marker></defs>';
-    $o .= '<line x1="118" y1="' . ($top-4) . '" x2="118" y2="' . ($top+$n*$row_h) . '" stroke="#d3d1c7" stroke-width="0.5"/>';
+    $o .= '<line x1="65" y1="'.($top-4).'" x2="65" y2="'.($top+$n*$row_h).'" stroke="#d3d1c7" stroke-width="0.5"/>';
 
     $ac = array(
         array('label'=>'Fournisseur','x'=>240,'w'=>96,'cx'=>288,'fi'=>'#E6F1FB','st'=>'#B5D4F4','tc'=>'#0C447C','lc'=>'#185FA5'),
         array('label'=>'PDP / PA',  'x'=>407,'w'=>86,'cx'=>450,'fi'=>'#F1EFE8','st'=>'#D3D1C7','tc'=>'#444441','lc'=>'#888780'),
-        array('label'=>'Client',     'x'=>567,'w'=>86,'cx'=>610,'fi'=>'#EAF3DE','st'=>'#C0DD97','tc'=>'#27500A','lc'=>'#3B6D11'),
+        array('label'=>'Client',    'x'=>567,'w'=>86,'cx'=>610,'fi'=>'#EAF3DE','st'=>'#C0DD97','tc'=>'#27500A','lc'=>'#3B6D11'),
     );
     foreach ($ac as $a) {
         $o .= '<rect x="'.$a['x'].'" y="8" width="'.$a['w'].'" height="26" rx="6" fill="'.$a['fi'].'" stroke="'.$a['st'].'" stroke-width="0.5"/>';
-        $o .= '<text x="'.$a['cx'].'" y="21" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="'.$a['tc'].'">'
-            . htmlspecialchars($a['label'], ENT_QUOTES) . '</text>';
+        $o .= '<text x="'.$a['cx'].'" y="21" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="500" fill="'.$a['tc'].'">'
+            . htmlspecialchars($a['label'], ENT_QUOTES).'</text>';
         $o .= '<line x1="'.$a['cx'].'" y1="34" x2="'.$a['cx'].'" y2="'.($top+$n*$row_h).'" stroke="'.$a['lc'].'" stroke-width="0.5" stroke-dasharray="5 4"/>';
     }
 
     foreach ($events as $i => $e) {
-        $y = $top + $i * $row_h + (int)($row_h / 2);
+        $y  = $top + $i * $row_h + (int)($row_h / 2);
+        $c  = $e['color'];
+
+        // Pastille : couleur sévérité pour les événements Factur-X
+        $dot_color = isset($severity_colors[$e['severity']]) ? $severity_colors[$e['severity']] : $c;
+        // Couleur du texte du label suit la pastille pour les events facturx
+        $label_color = $dot_color !== $c ? $dot_color : $c;
+
+        // Date / heure
+        $o .= '<text x="4" y="'.($y-6).'" dominant-baseline="central" font-size="10" font-weight="500" fill="#444441">'.htmlspecialchars($e['date'], ENT_QUOTES).'</text>';
+        $o .= '<text x="4" y="'.($y+7).'" dominant-baseline="central" font-size="10" fill="#888780">'.htmlspecialchars($e['time'], ENT_QUOTES).'</text>';
+
+        // Cercle (couleur sévérité pour facturx, couleur flux pour les autres)
         $r = ($e['flux'] === 'fournisseur' || $e['flux'] === 'client') ? 7 : 6;
-        $c = $e['color'];
-        $o .= '<text x="4" y="'.($y-6).'" dominant-baseline="central" font-size="11" font-weight="500" fill="#444441">'.htmlspecialchars($e['date'], ENT_QUOTES).'</text>';
-        $o .= '<text x="4" y="'.($y+7).'" dominant-baseline="central" font-size="11" fill="#888780">'.htmlspecialchars($e['time'], ENT_QUOTES).'</text>';
-        $o .= '<circle cx="118" cy="'.$y.'" r="'.$r.'" fill="'.$c.'"/>';
-        // Label — si tooltip présent, on l'enveloppe dans un <g><title> pour le survol
+        $o .= '<circle cx="65" cy="'.$y.'" r="'.$r.'" fill="'.$dot_color.'"/>';
+
+        // Label — popup SVG (<title>) si tooltip présent
+        $label_text = htmlspecialchars($e['label'], ENT_QUOTES);
         if (!empty($e['tooltip'])) {
             $o .= '<g style="cursor:help;">'
                 . '<title>'.htmlspecialchars($e['tooltip'], ENT_QUOTES).'</title>'
-                . '<text x="130" y="'.$y.'" dominant-baseline="central" font-size="12" font-weight="500" fill="'.$c.'" text-decoration="underline dotted">'.htmlspecialchars($e['label'], ENT_QUOTES).'</text>'
+                . '<text x="77" y="'.$y.'" dominant-baseline="central" font-size="10" font-weight="500" fill="'.$label_color.'" text-decoration="underline dotted">'.$label_text.'</text>'
                 . '</g>';
         } else {
-            $o .= '<text x="130" y="'.$y.'" dominant-baseline="central" font-size="12" font-weight="500" fill="'.$c.'">'.htmlspecialchars($e['label'], ENT_QUOTES).'</text>';
+            $o .= '<text x="77" y="'.$y.'" dominant-baseline="central" font-size="10" font-weight="500" fill="'.$label_color.'">'.$label_text.'</text>';
         }
 
+        // Icône circulaire pour les événements Factur-X internes (pas de flèche)
+        if ($e['code'] === 'facturx:generated' || $e['code'] === 'facturx:error') {
+            $ix = $cx[0]; $iy = $y; $ir = 8;
+            $sx = $ix + $ir * cos(deg2rad(-60)); $sy = $iy + $ir * sin(deg2rad(-60));
+            $ex = $ix + $ir * cos(deg2rad(220)); $ey = $iy + $ir * sin(deg2rad(220));
+            $o .= sprintf(
+                '<path d="M%.1f,%.1f A%d,%d 0 1,1 %.1f,%.1f" fill="none" stroke="%s" stroke-width="1.5" stroke-linecap="round"/>',
+                $sx, $sy, $ir, $ir, $ex, $ey, $dot_color
+            );
+            $ax = $ex; $ay = $ey;
+            $o .= sprintf(
+                '<polygon points="%.1f,%.1f %.1f,%.1f %.1f,%.1f" fill="%s"/>',
+                $ax, $ay, $ax - 4, $ay - 3, $ax - 2, $ay + 4, $dot_color
+            );
+            // Icône ⚠ + nombre d'avertissements décalés légèrement à gauche du centre
+            $nb = (int) $e['warnings_count'];
+            if ($nb > 0) {
+                // ⚠ à gauche, nombre à droite, ensemble décalé ~4px à gauche du centre de l'arc
+                $o .= sprintf(
+                    '<text x="%.1f" y="%.1f" text-anchor="middle" dominant-baseline="central" font-size="6" fill="%s">&#x26A0;</text>',
+                    $ix - 4.5, $iy + 0.5, $dot_color
+                );
+                $o .= sprintf(
+                    '<text x="%.1f" y="%.1f" text-anchor="middle" dominant-baseline="central" font-size="8" font-weight="600" fill="%s">%d</text>',
+                    $ix + 2.5, $iy + 0.5, $dot_color, $nb
+                );
+            }
+        }
+
+        // Flèche entre acteurs
         $fx = $cx[$e['seq_from']]; $tx = $cx[$e['seq_to']];
-        if ($fx === $tx) continue;
-        $x1 = ($fx < $tx) ? $fx+10 : $fx-10;
-        $x2 = ($fx < $tx) ? $tx-10 : $tx+10;
-        $da = $e['dashed'] ? ' stroke-dasharray="4 3"' : '';
-        $sw = ($e['flux'] === 'pdp' && $e['dashed']) ? '1' : '1.5';
-        $o .= '<line x1="'.$x1.'" y1="'.$y.'" x2="'.$x2.'" y2="'.$y.'" stroke="'.$c.'" stroke-width="'.$sw.'"'.$da.' marker-end="url(#lcA)"/>';
-        $lx = (int)(($x1+$x2)/2);
-        $bg = ($e['flux']==='fournisseur') ? '#E6F1FB' : (($e['flux']==='client') ? '#EAF3DE' : '#F1EFE8');
-        $o .= '<rect x="'.($lx-44).'" y="'.($y-12).'" width="88" height="16" rx="3" fill="'.$bg.'"/>';
-        $o .= '<text x="'.$lx.'" y="'.($y-4).'" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="500" fill="#2C2C2A">'.htmlspecialchars($e['code'], ENT_QUOTES).'</text>';
+        if ($fx !== $tx) {
+            $x1 = ($fx < $tx) ? $fx+10 : $fx-10;
+            $x2 = ($fx < $tx) ? $tx-10 : $tx+10;
+            $da = $e['dashed'] ? ' stroke-dasharray="4 3"' : '';
+            $sw = ($e['flux'] === 'pdp' && $e['dashed']) ? '1' : '1.5';
+            $o .= '<line x1="'.$x1.'" y1="'.$y.'" x2="'.$x2.'" y2="'.$y.'" stroke="'.$c.'" stroke-width="'.$sw.'"'.$da.' marker-end="url(#lcA)"/>';
+            $lx = (int)(($x1+$x2)/2);
+            $bg = ($e['flux']==='fournisseur') ? '#E6F1FB' : (($e['flux']==='client') ? '#EAF3DE' : '#F1EFE8');
+            $o .= '<rect x="'.($lx-44).'" y="'.($y-12).'" width="88" height="16" rx="3" fill="'.$bg.'"/>';
+            $o .= '<text x="'.$lx.'" y="'.($y-4).'" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="500" fill="#2C2C2A">'.htmlspecialchars($e['code'], ENT_QUOTES).'</text>';
+        }
     }
 
     $ly = $top + $n * $row_h + 20;
@@ -489,7 +626,7 @@ function lsp_render_svg(array $events)
     );
     foreach ($lg as $l) {
         $o .= '<line x1="'.$l['x'].'" y1="'.$ly.'" x2="'.($l['x']+26).'" y2="'.$ly.'" stroke="'.$l['s'].'" stroke-width="1.5" marker-end="url(#lcA)"/>';
-        $o .= '<text x="'.($l['x']+32).'" y="'.$ly.'" dominant-baseline="central" font-size="11" fill="'.$l['t'].'">'.htmlspecialchars($l['l'], ENT_QUOTES).'</text>';
+        $o .= '<text x="'.($l['x']+32).'" y="'.$ly.'" dominant-baseline="central" font-size="10" fill="'.$l['t'].'">'.htmlspecialchars($l['l'], ENT_QUOTES).'</text>';
     }
     $o .= '</svg>';
     return $o;

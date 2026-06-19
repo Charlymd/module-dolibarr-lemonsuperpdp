@@ -296,8 +296,8 @@ class modLemonSuperPDP extends DolibarrModules
 		}
 
 		// Rétro-alimentation flux sur events existants (basée sur status_code)
-		$fournisseur = "'fr:200','fr:201','fr:202','fr:203','fr:204','fr:205'";
-		$pdp         = "'ACK','ACK-01','ACK-02','REJECT','ROUTE'";
+		$fournisseur = "'fr:200','fr:201','fr:202','fr:203','fr:204','fr:205','api:uploaded','facturx:generated','facturx:error'";
+		$pdp         = "'ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR'";
 		$client      = "'fr:206','fr:207','fr:208','fr:209','fr:210','fr:211','fr:212'";
 		$backfills = array(
 			"UPDATE `" . $table . "` SET flux = 'fournisseur' WHERE status_code IN (" . $fournisseur . ") AND (flux IS NULL OR flux = '')",

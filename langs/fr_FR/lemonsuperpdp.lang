@@ -2,6 +2,12 @@
 # Copyright (C) 2026 SASU LEMON <https://hellolemon.fr>
 #
 # Transmission SUPER PDP
+LemonSuperPDPStatusPending=En attente d'envoi
+LemonSuperPDPStatusSent=Envoyée
+LemonSuperPDPStatusAccepted=Acceptée
+LemonSuperPDPStatusRefused=Refusée
+LemonSuperPDPStatusPaid=Encaissée
+LemonSuperPDPStatusError=Erreur de transmission
 LemonSuperPDPAlreadySent=Déjà transmise avec succès
 LemonSuperPDPSendInvoice=Envoyer via SUPER PDP
 LemonSuperPDPSendInvoiceTooltip=Envoyer cette facture via la Plateforme Agréée SUPER PDP
@@ -60,3 +66,5 @@ LemonSuperPDPOpenTab=Ouvrir l'onglet détail
 # Menus
 LemonSuperPDPMenuReceived=Factures reçues (SUPER PDP)
 LemonSuperPDPMenuEreporting=E-reporting B2C
+LemonSuperPDPForceResend=Forcer l'envoi vers SUPER PDP
+LemonSuperPDPForceResendConfirm=Renvoyer la facture à SUPER PDP même si elle a déjà été transmise ?

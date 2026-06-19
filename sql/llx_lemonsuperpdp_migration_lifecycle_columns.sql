@@ -18,7 +18,7 @@ ALTER TABLE llx_lemonsuperpdp_event
 -- Rétro-alimentation du champ flux sur les événements existants
 UPDATE llx_lemonsuperpdp_event
     SET flux = 'fournisseur'
-    WHERE status_code IN ('fr:200','fr:201','fr:202','fr:203','fr:204','fr:205')
+    WHERE status_code IN ('fr:200','fr:201','fr:202','fr:203','fr:204','fr:205','api:uploaded','facturx:generated','facturx:error')
       AND (flux IS NULL OR flux = '');
 
 UPDATE llx_lemonsuperpdp_event

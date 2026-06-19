@@ -439,11 +439,12 @@ class ActionsLemonSuperPDP
 	 *
 	 * @param Facture $facture  Facture Dolibarr (fetch déjà fait)
 	 * @param User    $user     Utilisateur qui déclenche l'envoi
+	 * @param bool    $force    true = ignore la garde hasSuccessfulTransmission
 	 * @return array{outcome:string, message:string, transmissionId?:int}
 	 *         outcome ∈ {ok, ok-recovered, error, skipped-draft,
 	 *         skipped-already, skipped-nopdf, skipped-create}
 	 */
-	public function sendOneInvoice($facture, $user)
+	public function sendOneInvoice($facture, $user, $force = false)
 	{
 		global $langs;
 
@@ -466,7 +467,7 @@ class ActionsLemonSuperPDP
 
 		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
 		$t = new LemonSuperPDPTransmission($this->db);
-		if ($t->hasSuccessfulTransmission($facture->id)) {
+		if (!$force && $t->hasSuccessfulTransmission($facture->id)) {
 			return array('outcome' => 'skipped-already', 'message' => $langs->trans('LemonSuperPDPAlreadySent'));
 		}
 
@@ -551,6 +552,7 @@ class ActionsLemonSuperPDP
 		}
 
 		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
+		dol_include_once('/lemonsuperpdp/class/event.class.php');
 		$outcome = array('outcome' => 'error', 'message' => '', 'transmissionId' => (int) $t->id);
 		try {
 			$client = new SuperPDPClient($this->db);
@@ -560,6 +562,21 @@ class ActionsLemonSuperPDP
 			$t->status = LemonSuperPDPTransmission::STATUS_SENT;
 			$t->payload_response = json_encode($response);
 			$t->update($user);
+
+			$evRet = LemonSuperPDPEvent::createAndLog($this->db, array(
+				'fk_transmission' => $t->id,
+				'status_code'     => 'api:uploaded',
+				'message'         => $force ? 'Envoi forcé vers SUPER PDP' : 'Facture envoyée vers SUPER PDP',
+				'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
+				'event_date'      => dol_now(),
+				'payload_raw'     => $force ? json_encode($response) : null,
+			), $user, $facture->id);
+			if ($evRet <= 0) {
+				dol_syslog('LemonSuperPDP: échec création événement envoi pour facture '.$facture->ref, LOG_WARNING);
+			}
+			if (!empty($response['events']) && is_array($response['events'])) {
+				LemonSuperPDPEvent::syncFromApiPayload($this->db, $response['events'], $t->id, $facture->id, $user);
+			}
 
 			$msg = $langs->trans('LemonSuperPDPSendSuccess');
 			if (!empty($t->superpdp_id)) {
@@ -571,18 +588,20 @@ class ActionsLemonSuperPDP
 			$outcome = array('outcome' => 'ok', 'message' => $msg, 'transmissionId' => (int) $t->id);
 		} catch (SuperPDPException $e) {
 			dol_syslog('LemonSuperPDP: échec envoi facture '.$facture->ref.' : '.$e->getMessage(), LOG_ERR);
-			// Cas edge : SUPER PDP nous dit que la facture est déjà présente.
-			// Le message contient l'id de la facture existante (ex : "La facture
-			// est déjà existante (id 39519)"). On en profite pour recoller la
-			// transmission locale à la facture distante plutôt que rester en
-			// état Error (évite de créer une nouvelle facture côté SUPER PDP
-			// juste parce qu'on a réinitialisé en local).
 			if ($e->httpCode === 400 && preg_match('/id\s+(\d+)/', $e->getMessage(), $m)) {
 				$t->superpdp_id = (int) $m[1];
 				$t->status = LemonSuperPDPTransmission::STATUS_SENT;
 				$t->error_message = null;
 				$t->payload_response = json_encode(array('recovered' => true, 'source_message' => $e->getMessage()));
 				$t->update($user);
+				LemonSuperPDPEvent::createAndLog($this->db, array(
+					'fk_transmission' => $t->id,
+					'status_code'     => 'api:uploaded',
+					'message'         => $force ? 'Envoi forcé vers SUPER PDP' : 'Facture retrouvée sur SUPER PDP (ID : '.(int) $t->superpdp_id.')',
+					'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
+					'event_date'      => dol_now(),
+					'payload_raw'     => $e->getMessage(),
+				), $user, $facture->id);
 				$outcome = array(
 					'outcome' => 'ok-recovered',
 					'message' => $langs->trans('LemonSuperPDPRecoveredExisting', (int) $t->superpdp_id),
@@ -595,6 +614,14 @@ class ActionsLemonSuperPDP
 					$t->payload_response = $e->responseBody;
 				}
 				$t->update($user);
+				LemonSuperPDPEvent::createAndLog($this->db, array(
+					'fk_transmission' => $t->id,
+					'status_code'     => 'api:uploaded',
+					'message'         => 'Erreur envoi SUPER PDP : '.$e->getMessage(),
+					'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
+					'event_date'      => dol_now(),
+					'payload_raw'     => $e->responseBody ?: null,
+				), $user, $facture->id);
 				$outcome = array(
 					'outcome' => 'error',
 					'message' => $langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(),
@@ -606,6 +633,13 @@ class ActionsLemonSuperPDP
 			$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
 			$t->error_message = $e->getMessage();
 			$t->update($user);
+			LemonSuperPDPEvent::createAndLog($this->db, array(
+				'fk_transmission' => $t->id,
+				'status_code'     => 'api:uploaded',
+				'message'         => 'Erreur envoi SUPER PDP : '.$e->getMessage(),
+				'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
+				'event_date'      => dol_now(),
+			), $user, $facture->id);
 			$outcome = array(
 				'outcome' => 'error',
 				'message' => $langs->trans('LemonSuperPDPSendError').' — '.$e->getMessage(),

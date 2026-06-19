@@ -23,6 +23,7 @@ class LemonSuperPDPEvent extends CommonObject
 
 	public $rowid;
 	public $fk_transmission;
+	public $fk_facture;
 	public $entity;
 	public $superpdp_event_id;
 	public $status_code;
@@ -65,6 +66,7 @@ class LemonSuperPDPEvent extends CommonObject
 		$this->id = $obj->rowid;
 		$this->rowid = $obj->rowid;
 		$this->fk_transmission = $obj->fk_transmission;
+		$this->fk_facture = isset($obj->fk_facture) ? $obj->fk_facture : null;
 		$this->entity = $obj->entity;
 		$this->superpdp_event_id = $obj->superpdp_event_id;
 		$this->status_code = $obj->status_code;
@@ -84,9 +86,10 @@ class LemonSuperPDPEvent extends CommonObject
 		$now = dol_now();
 
 		$sql = "INSERT INTO ".MAIN_DB_PREFIX."lemonsuperpdp_event (";
-		$sql .= "fk_transmission, entity, superpdp_event_id, status_code, message, direction, flux, event_date, payload_raw, date_creation, fk_user_creat";
+		$sql .= "fk_transmission, fk_facture, entity, superpdp_event_id, status_code, message, direction, flux, event_date, payload_raw, date_creation, fk_user_creat";
 		$sql .= ") VALUES (";
-		$sql .= ((int) $this->fk_transmission);
+		$sql .= (!empty($this->fk_transmission) ? ((int) $this->fk_transmission) : "NULL");
+		$sql .= ", ".(!empty($this->fk_facture) ? ((int) $this->fk_facture) : "NULL");
 		$sql .= ", ".((int) $conf->entity);
 		$sql .= ", ".(!empty($this->superpdp_event_id) ? ((int) $this->superpdp_event_id) : "NULL");
 		$sql .= ", '".$this->db->escape($this->status_code)."'";
@@ -135,7 +138,8 @@ class LemonSuperPDPEvent extends CommonObject
 	public static function createAndLog($db, array $attrs, $user, $fkFacture = null)
 	{
 		$ev = new self($db);
-		$ev->fk_transmission = isset($attrs['fk_transmission']) ? (int) $attrs['fk_transmission'] : 0;
+		$ev->fk_transmission = isset($attrs['fk_transmission']) ? (int) $attrs['fk_transmission'] : null;
+		$ev->fk_facture = isset($attrs['fk_facture']) ? (int) $attrs['fk_facture'] : null;
 		$ev->superpdp_event_id = isset($attrs['superpdp_event_id']) ? (int) $attrs['superpdp_event_id'] : null;
 		$ev->status_code = isset($attrs['status_code']) ? (string) $attrs['status_code'] : '';
 		$ev->message = isset($attrs['message']) ? $attrs['message'] : null;
@@ -239,8 +243,8 @@ class LemonSuperPDPEvent extends CommonObject
 	{
 		global $conf;
 		$sql = "SELECT e.* FROM ".MAIN_DB_PREFIX."lemonsuperpdp_event e";
-		$sql .= " INNER JOIN ".MAIN_DB_PREFIX."lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission";
-		$sql .= " WHERE t.fk_facture = ".((int) $fkFacture);
+		$sql .= " LEFT JOIN ".MAIN_DB_PREFIX."lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission";
+		$sql .= " WHERE COALESCE(t.fk_facture, e.fk_facture) = ".((int) $fkFacture);
 		$sql .= " AND e.entity = ".((int) $conf->entity);
 		$sql .= " ORDER BY e.event_date ASC, e.rowid ASC";
 
@@ -300,15 +304,16 @@ class LemonSuperPDPEvent extends CommonObject
 		}
 
 		$ac = new ActionComm($this->db);
-		$ac->type_code = 'AC_OTH_AUTO';
-		$ac->code = 'LEMONSUPERPDP_'.strtoupper(str_replace(array(':', '-'), '_', $this->status_code));
-		$ac->label = 'SUPER PDP : '.$label.' ('.$this->status_code.')';
+		$ac->type_code    = 'AC_OTH_AUTO';
+		$ac->code         = 'LEMONSUPERPDP_'.strtoupper(str_replace(array(':', '-'), '_', $this->status_code));
+		$ac->label        = 'SUPER PDP : '.$label.' ('.$this->status_code.')';
 		$ac->note_private = $note;
-		$ac->elementtype = 'facture';
-		$ac->fk_element = (int) $fkFacture;
-		$ac->datep = !empty($this->event_date) ? $this->event_date : dol_now();
-		$ac->datef = !empty($this->event_date) ? $this->event_date : dol_now();
-		$ac->percentage = -1;
+		$ac->elementtype  = 'facture';
+		$ac->fk_element   = (int) $fkFacture;
+		$ac->userownerid  = is_object($user) && !empty($user->id) ? (int) $user->id : 0;
+		$ac->datep        = !empty($this->event_date) ? $this->event_date : dol_now();
+		$ac->datef        = !empty($this->event_date) ? $this->event_date : dol_now();
+		$ac->percentage   = -1;
 
 		$ret = $ac->create($user);
 		if ($ret < 0) {
@@ -338,6 +343,11 @@ class LemonSuperPDPEvent extends CommonObject
 			'fr:210' => 'Refusée',
 			'fr:211' => 'Litige',
 			'fr:212' => 'Encaissée',
+			'ACK'    => 'Accusé de réception',
+			'ACK-01' => 'Accusé de réception',
+			'ACK-02' => 'Validation de format',
+			'REJECT' => 'Rejet technique',
+			'ROUTE'  => 'Routage confirmé',
 		);
 		return isset($map[$statusCode]) ? $map[$statusCode] : $statusCode;
 	}
@@ -392,21 +402,26 @@ class LemonSuperPDPEvent extends CommonObject
 	 */
 	public function getLifecycleBadgeContent($fk_facture, $dummy = null)
 	{
+		global $conf;
 		$fk_facture = (int) $fk_facture;
 
-		// Nombre d'events + dernier status_code
-		$sql = "SELECT e.status_code"
+		// Une seule requête : events + statut transmission en LEFT JOIN
+		$sql = "SELECT e.status_code, t.status AS t_status"
 		     . " FROM " . MAIN_DB_PREFIX . "lemonsuperpdp_event e"
 		     . " INNER JOIN " . MAIN_DB_PREFIX . "lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission"
 		     . " WHERE t.fk_facture = " . $fk_facture
+		     . " AND t.entity = " . ((int) $conf->entity)
 		     . " ORDER BY e.event_date DESC, e.rowid DESC";
 		$res = $this->db->query($sql);
 		if (!$res) return '';
+
 		$count = $this->db->num_rows($res);
 		if ($count === 0) {
-			// Pas d'event : vérifier si la transmission est en erreur
+			// Pas d'event : afficher un point rouge si la transmission est en erreur
 			$sqlT = "SELECT status FROM " . MAIN_DB_PREFIX . "lemonsuperpdp_transmission"
-			      . " WHERE fk_facture = " . $fk_facture . " ORDER BY rowid DESC LIMIT 1";
+			      . " WHERE fk_facture = " . $fk_facture
+			      . " AND entity = " . ((int) $conf->entity)
+			      . " ORDER BY rowid DESC LIMIT 1";
 			$resT = $this->db->query($sqlT);
 			if ($resT && $this->db->num_rows($resT) > 0) {
 				$t = $this->db->fetch_object($resT);
@@ -418,18 +433,8 @@ class LemonSuperPDPEvent extends CommonObject
 		}
 
 		$lastObj  = $this->db->fetch_object($res);
-		$lastCode = $lastObj ? $lastObj->status_code : '';
-
-		// Erreur de transmission remonte sur le badge
-		$sqlT = "SELECT status FROM " . MAIN_DB_PREFIX . "lemonsuperpdp_transmission"
-		      . " WHERE fk_facture = " . $fk_facture . " ORDER BY rowid DESC LIMIT 1";
-		$resT = $this->db->query($sqlT);
-		if ($resT && $this->db->num_rows($resT) > 0) {
-			$t = $this->db->fetch_object($resT);
-			if ($t->status === 'error') {
-				$lastCode = 'ERROR';
-			}
-		}
+		// Si la transmission elle-même est en erreur, elle prend le dessus sur le dernier code
+		$lastCode = ($lastObj && $lastObj->t_status === 'error') ? 'ERROR' : ($lastObj ? $lastObj->status_code : '');
 
 		$color = self::_badgeColor($lastCode);
 		return '<span style="color:' . $color . '">&#9679;</span> ' . $count;
