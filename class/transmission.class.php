@@ -250,21 +250,15 @@ class LemonSuperPDPTransmission extends CommonObject
 
 	public function update($user)
 	{
-		$sql = "UPDATE ".MAIN_DB_PREFIX."lemonsuperpdp_transmission SET";
+		$nullOrStr = function ($v) { return $v !== null ? "'".$this->db->escape($v)."'" : 'NULL'; };
+		$sql  = "UPDATE ".MAIN_DB_PREFIX."lemonsuperpdp_transmission SET";
 		$sql .= " superpdp_id = ".(!empty($this->superpdp_id) ? ((int) $this->superpdp_id) : "NULL");
 		$sql .= ", status = '".$this->db->escape($this->status)."'";
-		if ($this->status_raw !== null) {
-			$sql .= ", status_raw = '".$this->db->escape($this->status_raw)."'";
-		}
-		if ($this->recipient_address !== null) {
-			$sql .= ", recipient_address = '".$this->db->escape($this->recipient_address)."'";
-		}
-		if ($this->error_message !== null) {
-			$sql .= ", error_message = '".$this->db->escape($this->error_message)."'";
-		}
-		if ($this->payload_response !== null) {
-			$sql .= ", payload_response = '".$this->db->escape($this->payload_response)."'";
-		}
+		$sql .= ", format_sent = ".$nullOrStr($this->format_sent);
+		$sql .= ", status_raw = ".$nullOrStr($this->status_raw);
+		$sql .= ", recipient_address = ".$nullOrStr($this->recipient_address);
+		$sql .= ", error_message = ".$nullOrStr($this->error_message);
+		$sql .= ", payload_response = ".$nullOrStr($this->payload_response);
 		$sql .= ", date_status_update = '".$this->db->idate(dol_now())."'";
 		$sql .= " WHERE rowid = ".((int) $this->id);
 
