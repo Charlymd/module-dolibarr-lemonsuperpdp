@@ -91,6 +91,7 @@ class modLemonSuperPDP extends DolibarrModules
 			// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 			// Voir en-tête de class/actions_lemonsuperpdp.class.php pour le contexte.
 			array('LEMONSUPERPDP_SANDBOX_MODE', 'int', '0', 'Mode sandbox : remplace le SIREN émetteur par celui du champ idprof6 avant envoi', 1, 'current', 0),
+			array('LEMONSUPERPDP_SANDBOX_CLIENT_SIREN', 'chaine', '000000001', 'SIREN sandbox du destinataire fictif (Tricatel = 000000001)', 1, 'current', 0),
 			// >>> FIN SANDBOX MODE <<<
 		);
 
@@ -295,14 +296,17 @@ class modLemonSuperPDP extends DolibarrModules
 			$this->db->query("ALTER TABLE `" . $table . "` ADD INDEX `" . $idx_name . "` " . $idx_cols);
 		}
 
-		// Rétro-alimentation flux sur events existants (basée sur status_code)
+		// Rétro-alimentation flux sur events existants (basée sur status_code + direction)
+		// fr:212 émis par nous (direction='out') → fournisseur ; reçu (direction='in') → client
 		$fournisseur = "'fr:200','fr:201','fr:202','fr:203','fr:204','fr:205','api:uploaded','facturx:generated','facturx:error'";
 		$pdp         = "'ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR'";
-		$client      = "'fr:206','fr:207','fr:208','fr:209','fr:210','fr:211','fr:212'";
+		$client      = "'fr:206','fr:207','fr:208','fr:209','fr:210','fr:211'";
 		$backfills = array(
 			"UPDATE `" . $table . "` SET flux = 'fournisseur' WHERE status_code IN (" . $fournisseur . ") AND (flux IS NULL OR flux = '')",
 			"UPDATE `" . $table . "` SET flux = 'pdp'         WHERE status_code IN (" . $pdp         . ") AND (flux IS NULL OR flux = '')",
 			"UPDATE `" . $table . "` SET flux = 'client'      WHERE status_code IN (" . $client      . ") AND (flux IS NULL OR flux = '')",
+			"UPDATE `" . $table . "` SET flux = 'fournisseur' WHERE status_code = 'fr:212' AND direction = 'out' AND (flux IS NULL OR flux = '')",
+			"UPDATE `" . $table . "` SET flux = 'client'      WHERE status_code = 'fr:212' AND direction = 'in'  AND (flux IS NULL OR flux = '')",
 		);
 		foreach ($backfills as $sql) {
 			$this->db->query($sql);

@@ -28,5 +28,14 @@ UPDATE llx_lemonsuperpdp_event
 
 UPDATE llx_lemonsuperpdp_event
     SET flux = 'client'
-    WHERE status_code IN ('fr:206','fr:207','fr:208','fr:209','fr:210','fr:211','fr:212')
+    WHERE status_code IN ('fr:206','fr:207','fr:208','fr:209','fr:210','fr:211')
       AND (flux IS NULL OR flux = '');
+
+-- fr:212 émis par nous (direction=out) → fournisseur ; reçu (direction=in) → client
+UPDATE llx_lemonsuperpdp_event
+    SET flux = 'fournisseur'
+    WHERE status_code = 'fr:212' AND direction = 'out' AND (flux IS NULL OR flux = '');
+
+UPDATE llx_lemonsuperpdp_event
+    SET flux = 'client'
+    WHERE status_code = 'fr:212' AND direction = 'in' AND (flux IS NULL OR flux = '');

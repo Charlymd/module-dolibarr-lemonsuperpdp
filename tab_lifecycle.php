@@ -168,6 +168,7 @@ if ($action === 'send_lifecycle_status' && $canWrite) {
                     LemonSuperPDPEvent::createAndLog($db, array(
                         'fk_transmission' => $t->id,
                         'status_code'     => $status_code,
+                        'flux'            => 'fournisseur',
                         'message'         => lsp_label($status_code),
                         'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
                         'event_date'      => dol_now(),
@@ -179,11 +180,12 @@ if ($action === 'send_lifecycle_status' && $canWrite) {
                     }
                     $t->status_raw = $status_code;
                     $t->update($user);
-                    setEventMessages('Statut ' . dol_escape_htmltag($status_code) . ' envoyé.', null, 'mesgs');
+                    setEventMessages('Statut envoyé : ' . lsp_label($status_code), null, 'mesgs');
                 } catch (Exception $e) {
                     LemonSuperPDPEvent::createAndLog($db, array(
                         'fk_transmission' => $t->id,
-                        'status_code'     => $status_code,
+                        'status_code'     => 'ERROR',
+                        'flux'            => 'pdp',
                         'message'         => 'Erreur envoi statut '.$status_code.' : '.$e->getMessage(),
                         'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
                         'event_date'      => dol_now(),
@@ -223,19 +225,8 @@ if ($resq) {
 // ── Injection event d'erreur de transmission ─────────────────────────────────
 // Si la transmission est en erreur, on crée un événement synthétique 'ERROR'
 // dans le flux PA pour qu'il apparaisse dans la timeline et la colonne PDP/PA.
-if ($transmission->id > 0
-    && $transmission->status === LemonSuperPDPTransmission::STATUS_ERROR
-    && !empty($transmission->error_message)
-) {
-    $errEvt = new stdClass();
-    $errEvt->status_code = 'ERROR';
-    $errEvt->flux        = 'pdp';
-    $errEvt->direction   = 'in';
-    $errEvt->message     = $transmission->error_message;
-    // $transmission->tms est déjà un timestamp Unix (converti par jdate dans _setFromRow)
-    $errEvt->event_date  = $db->idate($transmission->tms ?: dol_now());
-    $events_raw[] = $errEvt;
-}
+// Les erreurs de transmission sont désormais enregistrées comme événements REJECT
+// dans llx_lemonsuperpdp_event — plus besoin d'injecter un event synthétique ERROR.
 
 // ── Dernier event par flux ───────────────────────────────────────────────────
 $last = array('fournisseur' => null, 'pdp' => null, 'client' => null);
@@ -260,7 +251,7 @@ if ($cc === 'fr:212') $step = 5;
 $svg_events = array();
 foreach ($events_raw as $e) {
     $fx      = lsp_flux($e->status_code, isset($e->flux) ? (string) $e->flux : '');
-    $msg     = isset($e->message) ? (string) $e->message : '';
+    $msg     = isset($e->message) ? lsp_plain((string) $e->message) : '';
     $payload = isset($e->payload_raw) ? (string) $e->payload_raw : '';
     if ($e->status_code === 'ERROR') {
         $tooltip = $msg;
@@ -286,12 +277,21 @@ foreach ($events_raw as $e) {
     } else {
         $severity = '';
     }
-    // Label court = code (ex. "fr:204"), libellé complet dans le tooltip
-    $fullLabel = lsp_label($e->status_code, $msg);
-    $shortLabel = ($e->status_code === 'ERROR') ? 'Erreur' : $e->status_code;
-    $svgTooltip = $tooltip ?: $fullLabel;
-    if ($msg && $msg !== $fullLabel) {
-        $svgTooltip .= ' — ' . $msg;
+    // Label tronqué à 36 caractères — le label complet et le payload vont dans le tooltip
+    $fullLabel  = lsp_label($e->status_code, $msg);
+    $shortLabel = mb_strimwidth($fullLabel, 0, 36, '…');
+    // Tooltip : payload_raw prioritaire, sinon label complet + code si tronqué
+    if ($tooltip) {
+        $svgTooltip = $tooltip;
+    } elseif ($shortLabel !== $fullLabel) {
+        $svgTooltip = $e->status_code . ' — ' . $fullLabel . ($msg && $msg !== $fullLabel ? ' — ' . $msg : '');
+    } else {
+        $svgTooltip = '';
+    }
+    // L'accusé de réception entrant (api:uploaded direction=in) vient de PDP/PA → Fournisseur
+    $direction = isset($e->direction) ? (string) $e->direction : '';
+    if ($e->status_code === 'api:uploaded' && $direction === 'in') {
+        $fx = 'pdp';
     }
     $svg_events[] = array(
         'code'     => $e->status_code,
@@ -301,13 +301,30 @@ foreach ($events_raw as $e) {
         'severity'       => $severity,
         'warnings_count' => $warnings_count,
         'date'     => dol_print_date($db->jdate($e->event_date), 'day'),
-        'time'     => dol_print_date($db->jdate($e->event_date), 'hour'),
-        'seq_from' => lsp_seq_from($e->status_code, $fx),
-        'seq_to'   => lsp_seq_to($e->status_code, $fx),
+        'time'     => dol_print_date($db->jdate($e->event_date), '%H:%M:%S'),
+        'seq_from' => ($e->status_code === 'api:uploaded' && $direction === 'in') ? 1 : lsp_seq_from($e->status_code, $fx),
+        'seq_to'   => ($e->status_code === 'api:uploaded' && $direction === 'in') ? 0 : lsp_seq_to($e->status_code, $fx),
         'color'    => lsp_color($e->status_code, $fx),
-        'dashed'   => lsp_dashed($e->status_code),
+        'dashed'   => lsp_dashed($e->status_code) || ($direction === 'in'),
+        'group'    => 0, // rempli ci-dessous
     );
 }
+
+// Calcul des groupes : events ayant le même date+heure = même requête PHP
+$_dtGroups = array();
+foreach ($svg_events as $i => $e) {
+    $key = $e['date'] . '|' . $e['time'];
+    $_dtGroups[$key][] = $i;
+}
+$_gid = 0;
+foreach ($_dtGroups as $indices) {
+    foreach ($indices as $i) {
+        $svg_events[$i]['group'] = $_gid;
+    }
+    $_gid++;
+}
+unset($_dtGroups, $_gid);
+
 
 $allowed = lsp_allowed_outgoing($fk, $db);
 
@@ -338,7 +355,7 @@ print '<div class="fichecenter">';
       <?php endfor; ?>
       <span style="font-size:11px;color:#5f5e5a;"><?php echo $step; ?>/5</span>
     </div>
-  </div>
+  </div><!-- fin .progression -->
 
   <!-- Dernier message -->
   <div style="display:flex;align-items:stretch;padding:8px 0;gap:8px;border-top:1px solid #e0ddd6;border-bottom:1px solid #e0ddd6;margin-bottom:4px;">
@@ -361,14 +378,25 @@ print '<div class="fichecenter">';
         <span style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;color:<?php echo $actor['color']; ?>;"><?php echo dol_escape_htmltag($actor['label']); ?></span>
       </div>
       <?php if ($evt): ?>
-      <?php $evtMsg = isset($evt->message) ? (string) $evt->message : ''; ?>
-      <div style="font-size:12px;font-weight:500;color:#2c2c2a;<?php echo ($evt->status_code === 'ERROR') ? 'text-decoration:underline dotted;cursor:help;' : ''; ?>"
-           <?php echo ($evt->status_code === 'ERROR' && $evtMsg) ? 'title="'.dol_escape_htmltag($evtMsg).'"' : ''; ?>>
-        <?php echo dol_escape_htmltag(lsp_label($evt->status_code, $evtMsg)); ?>
+      <?php
+        $evtMsg       = isset($evt->message) ? (string) $evt->message : '';
+        $evtFull      = lsp_label($evt->status_code, $evtMsg);
+        $evtShort     = mb_strimwidth($evtFull, 0, 36, '…');
+        $evtTitle     = ($evtFull !== $evtShort) ? $evtFull : $evtMsg;
+        $evtNeedTitle = ($evtFull !== $evtShort) || ($evt->status_code === 'ERROR' && $evtMsg);
+      ?>
+      <div style="font-size:12px;font-weight:500;color:#2c2c2a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;<?php echo $evtNeedTitle ? 'text-decoration:underline dotted;cursor:help;' : ''; ?>"
+           <?php echo $evtNeedTitle ? 'title="'.dol_escape_htmltag($evtTitle).'"' : ''; ?>>
+        <?php echo dol_escape_htmltag($evtShort); ?>
       </div>
       <div style="font-size:10px;color:#888780;margin-top:2px;"><?php echo dol_print_date($db->jdate($evt->event_date), 'dayhour'); ?></div>
       <?php else: ?>
       <div style="font-size:11px;color:#b4b2a9;font-style:italic;"><?php echo $langs->trans('LemonSuperPDPNoEvent'); ?></div>
+      <?php endif; ?>
+      <?php if ($flux_key === 'pdp' && $transmission->id > 0 && !empty($transmission->superpdp_id)): ?>
+      <div style="font-size:10px;color:#888780;margin-top:4px;border-top:1px solid #e0ddd6;padding-top:3px;">
+        ID SUPER PDP : <code style="font-size:10px;"><?php echo (int) $transmission->superpdp_id; ?></code>
+      </div>
       <?php endif; ?>
     </div>
     <?php endforeach; ?>
@@ -436,7 +464,7 @@ function lsp_flux($code, $flux_db = '')
     if (!empty($flux_db) && in_array($flux_db, array('fournisseur', 'pdp', 'client'), true)) {
         return $flux_db;
     }
-    $fournisseur = array('fr:200','fr:201','fr:202','fr:203','fr:204','fr:205','api:uploaded','facturx:generated','facturx:error');
+    $fournisseur = array('fr:200','fr:201','fr:202','fr:203','fr:204','fr:205','api:uploaded','api:recovered','facturx:generated','facturx:error');
     $pdp         = array('ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR');
     if (in_array($code, $fournisseur, true)) return 'fournisseur';
     if (in_array($code, $pdp, true))         return 'pdp';
@@ -446,18 +474,38 @@ function lsp_flux($code, $flux_db = '')
 function lsp_label($code, $override = '')
 {
     // Cas spéciaux non couverts par LemonSuperPDPEvent::getStatusLabel()
-    if ($code === 'ERROR') return 'Erreur';
-    if ($code === 'facturx:generated') return !empty($override) ? $override : 'Factur-X généré';
-    if ($code === 'facturx:error')     return !empty($override) ? $override : 'Erreur génération Factur-X';
-    if (!empty($override)) return $override;
+    if ($code === 'ERROR')         return 'Erreur envoi statut';
+    if ($code === 'api:recovered') return !empty($override) ? lsp_plain($override) : 'Déjà présente sur SUPER PDP';
+    if ($code === 'REJECT') return !empty($override) ? lsp_plain($override) : 'Rejet SUPER PDP';
+    if ($code === 'api:uploaded')        return !empty($override) ? lsp_plain($override) : 'Accusé réception téléversement';
+    if ($code === 'facturx:generated') {
+        // Le message peut contenir " — fichier.pdf" (ajouté par createAndLog depuis last_main_doc).
+        // Présence d'un nom de fichier = deuxième génération (validée).
+        // Absence = première génération automatique (provisoire).
+        if (!empty($override) && preg_match('/\s—\s\S.+\.\w+$/', $override)) {
+            return 'Factur-X généré — validée';
+        }
+        return 'Factur-X généré — provisoire';
+    }
+    if ($code === 'facturx:error')     return !empty($override) ? lsp_plain($override) : 'Erreur génération Factur-X';
+    if (!empty($override)) return lsp_plain($override);
     // Délègue à la source de vérité pour les codes AFNOR et ACK/REJECT/ROUTE
     return LemonSuperPDPEvent::getStatusLabel($code);
+}
+
+// $langs->trans() retourne parfois des entités HTML (&eacute; etc.).
+// On décode en UTF-8 pur pour que htmlspecialchars() du SVG ne double-encode pas.
+function lsp_plain($str)
+{
+    return html_entity_decode((string) $str, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
 function lsp_color($code, $flux = '')
 {
     if ($flux === '' || $flux === null) $flux = lsp_flux($code);
-    if ($code === 'ERROR')       return '#A32D2D';
+    if ($code === 'ERROR' || $code === 'REJECT') return '#A32D2D';
+    if ($code === 'api:recovered') return '#CC9900'; // ambre — avertissement recovery
+    if ($code === 'api:uploaded')  return '#3B6D11'; // vert — envoi API réussi
     if ($flux === 'fournisseur') return '#185FA5';
     if ($flux === 'pdp')         return '#888780';
     if ($code === 'fr:210')      return '#A32D2D';
@@ -467,15 +515,16 @@ function lsp_color($code, $flux = '')
 
 function lsp_dashed($code)
 {
-    return in_array($code, array('ACK','ACK-01','ACK-02','ROUTE','ERROR','fr:210','fr:211'), true);
+    return in_array($code, array('ACK','ACK-01','ACK-02','ROUTE','ERROR','REJECT','api:recovered','fr:210','fr:211'), true);
 }
 
 function lsp_seq_from($code, $flux = '')
 {
     if ($code === 'facturx:generated' || $code === 'facturx:error') return 0; // pas de flèche
-    if ($code === 'ERROR')       return 1;
-    if ($flux === 'fournisseur') return 0;
-    if ($flux === 'client')      return 2;
+    if ($code === 'api:recovered') return 1;  // réponse PA → Fournisseur
+    if ($code === 'ERROR')         return 1;
+    if ($flux === 'fournisseur')   return 0;
+    if ($flux === 'client')        return 2;
     if (in_array($code, array('ACK','ACK-01','ACK-02','REJECT'), true)) return 1;
     return 1;
 }
@@ -483,10 +532,11 @@ function lsp_seq_from($code, $flux = '')
 function lsp_seq_to($code, $flux = '')
 {
     if ($code === 'facturx:generated' || $code === 'facturx:error') return 0; // pas de flèche
-    if ($code === 'ERROR')       return 0;
-    if ($flux === 'fournisseur') return 1;
-    if ($flux === 'client')      return 1;
-    if ($flux === 'pdp')         return 0;  // PDP → Fournisseur par défaut (ACK, ROUTE…)
+    if ($code === 'api:recovered') return 0;  // réponse PA → Fournisseur
+    if ($code === 'ERROR')         return 0;
+    if ($flux === 'fournisseur')   return 1;
+    if ($flux === 'client')        return 1;
+    if ($flux === 'pdp')           return 0;
     if (in_array($code, array('ACK','ACK-01','ACK-02','REJECT'), true)) return 0;
     return 2;
 }
@@ -528,7 +578,7 @@ function lsp_render_svg(array $events)
         'error'   => '#A32D2D',   // rouge
     );
 
-    $o  = '<svg width="100%" viewBox="0 0 660 '.$h.'" style="display:block;margin:8px 0;">';
+    $o  = '<svg width="100%" viewBox="-10 0 670 '.$h.'" style="display:block;margin:8px 0;max-width:670px;">';
     $o .= '<defs><marker id="lcA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
         . '<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
         . '</marker></defs>';
@@ -563,7 +613,7 @@ function lsp_render_svg(array $events)
         $r = ($e['flux'] === 'fournisseur' || $e['flux'] === 'client') ? 7 : 6;
         $o .= '<circle cx="65" cy="'.$y.'" r="'.$r.'" fill="'.$dot_color.'"/>';
 
-        // Label — popup SVG (<title>) si tooltip présent
+        // Label déjà tronqué dans $svg_events — tooltip si présent
         $label_text = htmlspecialchars($e['label'], ENT_QUOTES);
         if (!empty($e['tooltip'])) {
             $o .= '<g style="cursor:help;">'
@@ -618,6 +668,26 @@ function lsp_render_svg(array $events)
         }
     }
 
+    // ── Indicateurs de regroupement ───────────────────────────────────────────
+    // Regroupe les indices par group ID, dessine un crochet arrondi sur la gauche
+    // pour chaque groupe de 2+ événements issus de la même requête.
+    $groupMap = array();
+    foreach ($events as $i => $e) {
+        if (!isset($e['group'])) continue;
+        $groupMap[$e['group']][] = $i;
+    }
+    foreach ($groupMap as $indices) {
+        if (count($indices) < 2) continue;
+        sort($indices);
+        $iFirst = $indices[0];
+        $iLast  = $indices[count($indices) - 1];
+        $yTop = $top + $iFirst * $row_h + 6;
+        $yBot = $top + ($iLast  + 1) * $row_h - 6;
+        $xBar = -8; $w = 4; $rx = 2;
+        $o .= '<rect x="'.$xBar.'" y="'.$yTop.'" width="'.$w.'" height="'.($yBot - $yTop).'"'
+            . ' rx="'.$rx.'" fill="#e8e6e0" stroke="#888780" stroke-width="0.75"/>';
+    }
+
     $ly = $top + $n * $row_h + 20;
     $lg = array(
         array('x'=>240,'s'=>'#185FA5','l'=>'Fournisseur','t'=>'#0C447C'),
@@ -628,6 +698,18 @@ function lsp_render_svg(array $events)
         $o .= '<line x1="'.$l['x'].'" y1="'.$ly.'" x2="'.($l['x']+26).'" y2="'.$ly.'" stroke="'.$l['s'].'" stroke-width="1.5" marker-end="url(#lcA)"/>';
         $o .= '<text x="'.($l['x']+32).'" y="'.$ly.'" dominant-baseline="central" font-size="10" fill="'.$l['t'].'">'.htmlspecialchars($l['l'], ENT_QUOTES).'</text>';
     }
+
+    // Icône circulaire — action locale (Factur-X)
+    $lic = '#888780'; $licx = 545; $lir = 5;
+    $lsx = $licx + $lir * cos(deg2rad(-60)); $lsy = $ly + $lir * sin(deg2rad(-60));
+    $lex = $licx + $lir * cos(deg2rad(220)); $ley = $ly  + $lir * sin(deg2rad(220));
+    $o .= sprintf('<path d="M%.1f,%.1f A%d,%d 0 1,1 %.1f,%.1f" fill="none" stroke="%s" stroke-width="1.2" stroke-linecap="round"/>',
+        $lsx, $lsy, $lir, $lir, $lex, $ley, $lic);
+    $o .= sprintf('<polygon points="%.1f,%.1f %.1f,%.1f %.1f,%.1f" fill="%s"/>',
+        $lex, $ley, $lex - 2.5, $ley - 2, $lex - 1, $ley + 2.5, $lic);
+    $o .= sprintf('<text x="%.1f" y="%d" dominant-baseline="central" font-size="10" fill="%s">Action locale</text>',
+        $licx + $lir + 5, $ly, $lic);
+
     $o .= '</svg>';
     return $o;
 }

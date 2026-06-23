@@ -148,6 +148,23 @@ class LemonSuperPDPEvent extends CommonObject
 		$ev->event_date = isset($attrs['event_date']) ? $attrs['event_date'] : dol_now();
 		$ev->payload_raw = isset($attrs['payload_raw']) ? $attrs['payload_raw'] : null;
 
+		// Pour facturx:generated, enrichit le message avec le nom du dernier PDF
+		// généré (last_main_doc sur la facture) — sans modifier LemonFacturX.
+		if ($ev->status_code === 'facturx:generated') {
+			$fk = !empty($ev->fk_facture) ? (int) $ev->fk_facture : (int) $fkFacture;
+			if ($fk > 0) {
+				$sqlDoc = "SELECT last_main_doc FROM " . MAIN_DB_PREFIX . "facture WHERE rowid = " . $fk;
+				$resDoc = $db->query($sqlDoc);
+				if ($resDoc && $db->num_rows($resDoc) > 0) {
+					$objDoc = $db->fetch_object($resDoc);
+					if (!empty($objDoc->last_main_doc)) {
+						$docName = basename($objDoc->last_main_doc);
+						$ev->message = rtrim((string) $ev->message, '.') . ' — ' . $docName;
+					}
+				}
+			}
+		}
+
 		$ret = $ev->create($user);
 		if ($ret > 0 && !empty($fkFacture)) {
 			$ev->createActionComm((int) $fkFacture, $user);
@@ -292,6 +309,15 @@ class LemonSuperPDPEvent extends CommonObject
 
 		require_once DOL_DOCUMENT_ROOT.'/comm/action/class/actioncomm.class.php';
 
+		// Récupère le tiers de la facture pour renseigner fk_soc (nécessaire pour que
+		// Dolibarr affiche l'événement dans l'onglet Événements de la fiche facture).
+		$fkSoc = 0;
+		$sqlSoc = "SELECT fk_soc FROM ".MAIN_DB_PREFIX."facture WHERE rowid = ".((int) $fkFacture);
+		$resSoc = $this->db->query($sqlSoc);
+		if ($resSoc && $this->db->num_rows($resSoc)) {
+			$fkSoc = (int) $this->db->fetch_object($resSoc)->fk_soc;
+		}
+
 		$label = !empty($this->message) ? $this->message : self::getStatusLabel($this->status_code);
 		$dirSuffix = ($this->direction === self::DIRECTION_OUT) ? ' (émis)' : ' (reçu)';
 
@@ -308,12 +334,13 @@ class LemonSuperPDPEvent extends CommonObject
 		$ac->code         = 'LEMONSUPERPDP_'.strtoupper(str_replace(array(':', '-'), '_', $this->status_code));
 		$ac->label        = 'SUPER PDP : '.$label.' ('.$this->status_code.')';
 		$ac->note_private = $note;
-		$ac->elementtype  = 'facture';
+		$ac->elementtype  = 'invoice';
 		$ac->fk_element   = (int) $fkFacture;
+		$ac->fk_soc       = $fkSoc;
 		$ac->userownerid  = is_object($user) && !empty($user->id) ? (int) $user->id : 0;
 		$ac->datep        = !empty($this->event_date) ? $this->event_date : dol_now();
 		$ac->datef        = !empty($this->event_date) ? $this->event_date : dol_now();
-		$ac->percentage   = -1;
+		$ac->percentage   = 100;
 
 		$ret = $ac->create($user);
 		if ($ret < 0) {
@@ -405,12 +432,12 @@ class LemonSuperPDPEvent extends CommonObject
 		global $conf;
 		$fk_facture = (int) $fk_facture;
 
-		// Une seule requête : events + statut transmission en LEFT JOIN
-		$sql = "SELECT e.status_code, t.status AS t_status"
+		// LEFT JOIN pour inclure les events sans transmission (ex: facturx:generated)
+		$sql = "SELECT e.status_code, t.status AS t_status, t.status_raw AS t_status_raw"
 		     . " FROM " . MAIN_DB_PREFIX . "lemonsuperpdp_event e"
-		     . " INNER JOIN " . MAIN_DB_PREFIX . "lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission"
-		     . " WHERE t.fk_facture = " . $fk_facture
-		     . " AND t.entity = " . ((int) $conf->entity)
+		     . " LEFT JOIN " . MAIN_DB_PREFIX . "lemonsuperpdp_transmission t ON t.rowid = e.fk_transmission"
+		     . " WHERE COALESCE(t.fk_facture, e.fk_facture) = " . $fk_facture
+		     . " AND e.entity = " . ((int) $conf->entity)
 		     . " ORDER BY e.event_date DESC, e.rowid DESC";
 		$res = $this->db->query($sql);
 		if (!$res) return '';
@@ -432,18 +459,30 @@ class LemonSuperPDPEvent extends CommonObject
 			return '';
 		}
 
-		$lastObj  = $this->db->fetch_object($res);
-		// Si la transmission elle-même est en erreur, elle prend le dessus sur le dernier code
-		$lastCode = ($lastObj && $lastObj->t_status === 'error') ? 'ERROR' : ($lastObj ? $lastObj->status_code : '');
+		$lastObj    = $this->db->fetch_object($res);
+		$lastCode   = $lastObj ? $lastObj->status_code : '';
+		$tStatus    = $lastObj ? (string) $lastObj->t_status : '';
+		$tStatusRaw = $lastObj ? (string) $lastObj->t_status_raw : '';
 
-		$color = self::_badgeColor($lastCode);
+		$badCodes = array('ERROR', 'REJECT', 'fr:201', 'fr:203', 'fr:210', 'fr:211');
+		if (in_array($lastCode, $badCodes, true) || $tStatus === 'error') {
+			$color = self::_badgeColor($lastCode); // rouge ou orange selon le code
+		} elseif ($tStatusRaw === 'recovered') {
+			$color = '#CC9900'; // jaune/ambre — transmission récupérée (avertissement)
+		} elseif (in_array($tStatus, array('sent', 'accepted', 'paid'), true)) {
+			$color = '#3B6D11'; // vert — transmission réussie
+		} else {
+			$color = self::_badgeColor($lastCode);
+		}
+
 		return '<span style="color:' . $color . '">&#9679;</span> ' . $count;
 	}
 
 	private static function _badgeColor($code)
 	{
 		if (in_array($code, array('ERROR', 'fr:210', 'REJECT', 'fr:201', 'fr:203'), true)) return '#A32D2D';
-		if ($code === 'fr:211') return '#854F0B';
+		if ($code === 'fr:211')        return '#854F0B';
+		if ($code === 'api:recovered') return '#CC9900'; // ambre — avertissement
 		if (in_array($code, array('fr:212', 'fr:206', 'fr:207'), true))              return '#3B6D11';
 		if (in_array($code, array('fr:204', 'fr:205', 'fr:208', 'fr:209',
 		                          'fr:200', 'fr:202', 'ACK', 'ACK-01',

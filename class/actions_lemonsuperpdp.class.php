@@ -476,7 +476,12 @@ class ActionsLemonSuperPDP
 		// Fail-open : si l'annuaire est injoignable on tente quand même,
 		// la PA refera le contrôle. Désactivé en mode sandbox (les SIREN
 		// de test n'existent pas dans l'annuaire de production).
-		if (getDolGlobalInt('LEMONSUPERPDP_PRECHECK_DIRECTORY', 1) && !getDolGlobalInt('LEMONSUPERPDP_SANDBOX_MODE')) {
+		// Pre-check ignoré si : constante désactivée, mode sandbox, ou adresse Peppol
+		// directe renseignée sur le tiers (idprof5) — le routage sera forcé via BT-49.
+		$hasPeppolAddress = !empty($facture->thirdparty->idprof5);
+		if (getDolGlobalInt('LEMONSUPERPDP_PRECHECK_DIRECTORY', 1)
+			&& !getDolGlobalInt('LEMONSUPERPDP_SANDBOX_MODE')
+			&& !$hasPeppolAddress) {
 			$buyerSiren = '';
 			if (!empty($facture->thirdparty)) {
 				$rawId = !empty($facture->thirdparty->idprof2) ? $facture->thirdparty->idprof2 : ($facture->thirdparty->idprof1 ?? '');
@@ -536,8 +541,8 @@ class ActionsLemonSuperPDP
 				$patched = $this->applySandboxXmlPatch($facture, $pdfPath);
 				$tmpXmlPath = $patched['tmpPath'];
 				$fileToSend = $tmpXmlPath;
-				$formatSent = 'cii';
-				$t->format_sent = 'cii-sandbox';
+				$formatSent = 'facturx';
+				$t->format_sent = 'facturx-sandbox';
 			} catch (Exception $e) {
 				dol_syslog('LemonSuperPDP [SANDBOX]: '.$e->getMessage(), LOG_ERR);
 				$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
@@ -549,6 +554,14 @@ class ActionsLemonSuperPDP
 					'transmissionId' => (int) $t->id,
 				);
 			}
+		}
+
+		// Injection BT-49 (adresse électronique acheteur) depuis idprof5 du tiers
+		// pour forcer le routage Peppol direct sans pré-check annuaire côté SUPER PDP.
+		$tmpBt49Path = $this->injectBuyerPeppolAddress($fileToSend, $facture);
+		if ($tmpBt49Path !== null) {
+			$fileToSend = $tmpBt49Path;
+			dol_syslog('LemonSuperPDP: BT-49 injecté depuis idprof5 ('.$facture->thirdparty->idprof5.') pour '.$facture->ref, LOG_INFO);
 		}
 
 		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
@@ -563,13 +576,18 @@ class ActionsLemonSuperPDP
 			$t->payload_response = json_encode($response);
 			$t->update($user);
 
+			$uploadMsg = $force ? 'Envoi forcé vers SUPER PDP' : 'Facture envoyée vers SUPER PDP';
+			if (!empty($t->superpdp_id)) {
+				$uploadMsg .= ' — ID #'.((int) $t->superpdp_id);
+			}
 			$evRet = LemonSuperPDPEvent::createAndLog($this->db, array(
 				'fk_transmission' => $t->id,
 				'status_code'     => 'api:uploaded',
-				'message'         => $force ? 'Envoi forcé vers SUPER PDP' : 'Facture envoyée vers SUPER PDP',
+				'flux'            => 'fournisseur',
+				'message'         => $uploadMsg,
 				'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
 				'event_date'      => dol_now(),
-				'payload_raw'     => $force ? json_encode($response) : null,
+				'payload_raw'     => json_encode($response),
 			), $user, $facture->id);
 			if ($evRet <= 0) {
 				dol_syslog('LemonSuperPDP: échec création événement envoi pour facture '.$facture->ref, LOG_WARNING);
@@ -591,14 +609,26 @@ class ActionsLemonSuperPDP
 			if ($e->httpCode === 400 && preg_match('/id\s+(\d+)/', $e->getMessage(), $m)) {
 				$t->superpdp_id = (int) $m[1];
 				$t->status = LemonSuperPDPTransmission::STATUS_SENT;
+				$t->status_raw = 'recovered';
 				$t->error_message = null;
 				$t->payload_response = json_encode(array('recovered' => true, 'source_message' => $e->getMessage()));
 				$t->update($user);
+				// Événement 1 : envoi de la facture (sortant, Fournisseur → PA)
 				LemonSuperPDPEvent::createAndLog($this->db, array(
 					'fk_transmission' => $t->id,
 					'status_code'     => 'api:uploaded',
-					'message'         => $force ? 'Envoi forcé vers SUPER PDP' : 'Facture retrouvée sur SUPER PDP (ID : '.(int) $t->superpdp_id.')',
+					'flux'            => 'fournisseur',
+					'message'         => $force ? 'Envoi forcé vers SUPER PDP' : 'Facture envoyée vers SUPER PDP',
 					'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
+					'event_date'      => dol_now(),
+				), $user, $facture->id);
+				// Événement 2 : réponse PA — facture déjà présente (entrant, PA → Fournisseur)
+				LemonSuperPDPEvent::createAndLog($this->db, array(
+					'fk_transmission' => $t->id,
+					'status_code'     => 'api:recovered',
+					'flux'            => 'pdp',
+					'message'         => $langs->trans('LemonSuperPDPRecoveredExisting', (int) $t->superpdp_id),
+					'direction'       => LemonSuperPDPEvent::DIRECTION_IN,
 					'event_date'      => dol_now(),
 					'payload_raw'     => $e->getMessage(),
 				), $user, $facture->id);
@@ -614,11 +644,22 @@ class ActionsLemonSuperPDP
 					$t->payload_response = $e->responseBody;
 				}
 				$t->update($user);
+				// Événement 1 : tentative d'envoi (sortant)
 				LemonSuperPDPEvent::createAndLog($this->db, array(
 					'fk_transmission' => $t->id,
 					'status_code'     => 'api:uploaded',
-					'message'         => 'Erreur envoi SUPER PDP : '.$e->getMessage(),
+					'flux'            => 'fournisseur',
+					'message'         => $force ? 'Envoi forcé vers SUPER PDP' : 'Facture envoyée vers SUPER PDP',
 					'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
+					'event_date'      => dol_now(),
+				), $user, $facture->id);
+				// Événement 2 : rejet reçu de SUPER PDP (entrant)
+				LemonSuperPDPEvent::createAndLog($this->db, array(
+					'fk_transmission' => $t->id,
+					'status_code'     => 'REJECT',
+					'flux'            => 'pdp',
+					'message'         => $e->getMessage(),
+					'direction'       => LemonSuperPDPEvent::DIRECTION_IN,
 					'event_date'      => dol_now(),
 					'payload_raw'     => $e->responseBody ?: null,
 				), $user, $facture->id);
@@ -633,11 +674,20 @@ class ActionsLemonSuperPDP
 			$t->status = LemonSuperPDPTransmission::STATUS_ERROR;
 			$t->error_message = $e->getMessage();
 			$t->update($user);
+			// Événement 1 : tentative d'envoi (sortant)
 			LemonSuperPDPEvent::createAndLog($this->db, array(
 				'fk_transmission' => $t->id,
 				'status_code'     => 'api:uploaded',
-				'message'         => 'Erreur envoi SUPER PDP : '.$e->getMessage(),
+				'message'         => $force ? 'Envoi forcé vers SUPER PDP' : 'Facture envoyée vers SUPER PDP',
 				'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
+				'event_date'      => dol_now(),
+			), $user, $facture->id);
+			// Événement 2 : erreur technique (entrant)
+			LemonSuperPDPEvent::createAndLog($this->db, array(
+				'fk_transmission' => $t->id,
+				'status_code'     => 'REJECT',
+				'message'         => $e->getMessage(),
+				'direction'       => LemonSuperPDPEvent::DIRECTION_IN,
 				'event_date'      => dol_now(),
 			), $user, $facture->id);
 			$outcome = array(
@@ -650,8 +700,77 @@ class ActionsLemonSuperPDP
 		if ($tmpXmlPath !== null && file_exists($tmpXmlPath)) {
 			@unlink($tmpXmlPath);
 		}
+		if ($tmpBt49Path !== null && file_exists($tmpBt49Path)) {
+			@unlink($tmpBt49Path);
+		}
 
 		return $outcome;
+	}
+
+	/**
+	 * Injecte l'adresse électronique Peppol de l'acheteur (BT-49) dans le PDF Factur-X.
+	 * Source : champ RNA (idprof5) du tiers, format "SCHEME:ID" (ex: "0225:315143296_2887")
+	 * ou juste "ID" (schème 0225 par défaut).
+	 * Retourne le chemin d'un PDF temporaire patché, ou null si rien à faire.
+	 *
+	 * @param string  $pdfPath  Chemin du PDF source
+	 * @param Facture $facture  Facture avec thirdparty chargé
+	 * @return string|null
+	 */
+	private function injectBuyerPeppolAddress($pdfPath, $facture)
+	{
+		if (empty($facture->thirdparty)) {
+			$facture->fetch_thirdparty();
+		}
+		$peppolRaw = !empty($facture->thirdparty->idprof5) ? trim($facture->thirdparty->idprof5) : '';
+		if ($peppolRaw === '') return null;
+
+		if (strpos($peppolRaw, ':') !== false) {
+			list($scheme, $peppolId) = explode(':', $peppolRaw, 2);
+		} else {
+			$scheme   = '0225';
+			$peppolId = $peppolRaw;
+		}
+
+		$facturxVendor = DOL_DOCUMENT_ROOT.'/custom/lemonfacturx/vendor/autoload.php';
+		if (!file_exists($facturxVendor)) return null;
+		require_once $facturxVendor;
+
+		$pdfBinary = file_get_contents($pdfPath);
+		$reader    = new \Atgp\FacturX\Reader();
+		$xml       = $reader->extractXML($pdfBinary, false);
+
+		$uriElem = '<ram:URIUniversalCommunication>'
+			. '<ram:URIID schemeID="'.htmlspecialchars($scheme, ENT_XML1).'">'.htmlspecialchars($peppolId, ENT_XML1).'</ram:URIID>'
+			. '</ram:URIUniversalCommunication>';
+
+		// Insérer ou remplacer BT-49 dans le bloc BuyerTradeParty
+		$patched = preg_replace_callback(
+			'/<[\w:]*BuyerTradeParty\b[^>]*>.*?<\/[\w:]*BuyerTradeParty>/s',
+			function ($m) use ($uriElem) {
+				$block = $m[0];
+				if (preg_match('/<ram:URIUniversalCommunication>/i', $block)) {
+					// Remplace l'existant
+					return preg_replace(
+						'/<ram:URIUniversalCommunication>.*?<\/ram:URIUniversalCommunication>/s',
+						$uriElem,
+						$block
+					);
+				}
+				// Insère avant la balise fermante
+				return preg_replace('/(<\/[\w:]*BuyerTradeParty>)/', $uriElem.'$1', $block);
+			},
+			$xml
+		);
+
+		if (!$patched || $patched === $xml) return null;
+
+		$writer    = new \Atgp\FacturX\Writer();
+		$patchedPdf = $writer->generate($pdfBinary, $patched, null, false);
+
+		$tmpPath = tempnam(sys_get_temp_dir(), 'lemonspd_bt49_').'.pdf';
+		file_put_contents($tmpPath, $patchedPdf);
+		return $tmpPath;
 	}
 
 	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
@@ -670,7 +789,14 @@ class ActionsLemonSuperPDP
 	{
 		global $mysoc, $langs;
 
-		$fakeSiren = !empty($mysoc->idprof6) ? preg_replace('/[^0-9]/', '', $mysoc->idprof6) : '';
+		// fakeSiren = SIREN de session OAuth (idprof1, ex: 000000002 pour Burger Queen sandbox)
+		// fakeSellerPeppol = identifiant Peppol vendeur sandbox (idprof6, ex: 315143296_2888)
+		// Ces deux valeurs sont distinctes dans le sandbox SUPER PDP.
+		$fakeSiren = !empty($mysoc->idprof1) ? preg_replace('/[^0-9]/', '', $mysoc->idprof1) : '';
+		if (strlen($fakeSiren) !== 9) {
+			$fakeSiren = !empty($mysoc->idprof2) ? substr(preg_replace('/[^0-9]/', '', $mysoc->idprof2), 0, 9) : '';
+		}
+		$fakeSellerPeppol = !empty($mysoc->idprof6) ? trim($mysoc->idprof6) : '';
 		$realSiren = !empty($mysoc->idprof2) ? substr(preg_replace('/[^0-9]/', '', $mysoc->idprof2), 0, 9) : '';
 		if (empty($fakeSiren)) {
 			throw new Exception($langs->trans('LemonSuperPDPSandboxModeIdProf6Missing'));
@@ -684,7 +810,7 @@ class ActionsLemonSuperPDP
 			$clientSrc = !empty($facture->thirdparty->idprof1) ? $facture->thirdparty->idprof1 : $facture->thirdparty->idprof2;
 			$realClientSiren = substr(preg_replace('/[^0-9]/', '', (string) $clientSrc), 0, 9);
 		}
-		$fakeClientSiren = '000000001';  // Tricatel sandbox SUPER PDP
+		$fakeClientSiren = getDolGlobalString('LEMONSUPERPDP_SANDBOX_CLIENT_SIREN', '000000001');
 
 		// On réutilise la lib atgp/factur-x déjà embarquée dans LemonFacturX
 		// (pas de dépendance composer dans LemonSuperPDP).
@@ -699,40 +825,128 @@ class ActionsLemonSuperPDP
 
 		$fakeVendorVat = self::computeFrVatNumber($fakeSiren);
 		$realVendorVat = !empty($mysoc->tva_intra) ? preg_replace('/\s+/', '', $mysoc->tva_intra) : '';
+		// Numéro TVA de l'endpoint Peppol vendeur (calculé depuis fakeSiren, pas fakeSellerPeppol)
+		$fakeVendorPeppolVat = $fakeVendorVat;
 		$fakeClientVat = self::computeFrVatNumber($fakeClientSiren);
 		$realClientVat = '';
 		if (!empty($facture->thirdparty) && !empty($facture->thirdparty->tva_intra)) {
 			$realClientVat = preg_replace('/\s+/', '', $facture->thirdparty->tva_intra);
 		}
 
+		// Augmente la limite PCRE pour les gros XML Factur-X
+		$prevBacktrackLimit = ini_get('pcre.backtrack_limit');
+		ini_set('pcre.backtrack_limit', 5000000);
+
+		// Étape 1 — remplacer d'abord le SIREN acheteur dans le bloc BuyerTradeParty
+		$result1 = preg_replace_callback(
+			'/<[\w:]*BuyerTradeParty\b[^>]*>.*?<\/[\w:]*BuyerTradeParty>/s',
+			function ($m) use ($realClientSiren, $fakeClientSiren, $realClientVat, $fakeClientVat) {
+				$block = $m[0];
+				if (!empty($realClientSiren)) {
+					$block = str_replace(
+						array('>'.$realClientSiren.'<', '"'.$realClientSiren.'"'),
+						array('>'.$fakeClientSiren.'<', '"'.$fakeClientSiren.'"'),
+						$block
+					);
+				}
+				if (!empty($realClientVat)) {
+					$block = str_replace(
+						array('>'.$realClientVat.'<', '"'.$realClientVat.'"'),
+						array('>'.$fakeClientVat.'<', '"'.$fakeClientVat.'"'),
+						$block
+					);
+				}
+				return $block;
+			},
+			$xml
+		);
+		$patched = ($result1 !== null) ? $result1 : $xml;
+
+		// Étape 2 — remplacer le SIREN / TVA vendeur sur le reste du XML
 		$search = array('>'.$realSiren.'<', '"'.$realSiren.'"');
 		$replace = array('>'.$fakeSiren.'<', '"'.$fakeSiren.'"');
-		if (strlen($realClientSiren) === 9 && $realClientSiren !== $realSiren) {
-			$search[] = '>'.$realClientSiren.'<';
-			$search[] = '"'.$realClientSiren.'"';
-			$replace[] = '>'.$fakeClientSiren.'<';
-			$replace[] = '"'.$fakeClientSiren.'"';
-		}
 		if (!empty($realVendorVat)) {
 			$search[] = '>'.$realVendorVat.'<';
 			$search[] = '"'.$realVendorVat.'"';
 			$replace[] = '>'.$fakeVendorVat.'<';
 			$replace[] = '"'.$fakeVendorVat.'"';
 		}
-		if (!empty($realClientVat) && $realClientVat !== $realVendorVat) {
-			$search[] = '>'.$realClientVat.'<';
-			$search[] = '"'.$realClientVat.'"';
-			$replace[] = '>'.$fakeClientVat.'<';
-			$replace[] = '"'.$fakeClientVat.'"';
+		$patched = str_replace($search, $replace, $patched);
+
+		// Étape 3 — remplacer l'endpoint Peppol vendeur (BT-34) dans SellerTradeParty
+		// LemonFacturX génère BT-34 = 0225:{fakeSiren} mais SUPER PDP sandbox attend
+		// 0225:{fakeSellerPeppol} (ex: 0225:315143296_2888 pour Burger Queen).
+		if (!empty($fakeSellerPeppol) && $fakeSellerPeppol !== $fakeSiren) {
+			$result3 = preg_replace_callback(
+				'/<[\w:]*SellerTradeParty\b[^>]*>.*?<\/[\w:]*SellerTradeParty>/s',
+				function ($m) use ($fakeSiren, $fakeSellerPeppol) {
+					$block = $m[0];
+					$replaced = preg_replace(
+						'/(schemeID=["\']0225["\']>)'.preg_quote($fakeSiren, '/').'(<)/i',
+						'${1}'.str_replace('$', '\$', $fakeSellerPeppol).'${2}',
+						$block
+					);
+					return ($replaced !== null) ? $replaced : $block;
+				},
+				$patched
+			);
+			if ($result3 !== null) {
+				$patched = $result3;
+			}
 		}
-		$patched = str_replace($search, $replace, $xml);
 
-		$tmpXmlPath = tempnam(sys_get_temp_dir(), 'lemonspd_').'.xml';
-		file_put_contents($tmpXmlPath, $patched);
+		// Étape 4 — remplacer le BT-49 acheteur (URIUniversalCommunication dans BuyerTradeParty)
+		// avec l'adresse Peppol sandbox du client (idprof6, ex: 0225:315143296_2887 pour Tricatel).
+		// Sans cette étape, le pre-check SUPER PDP rejette la facture car l'adresse buyer
+		// dans le XML correspond au vrai client et non au sandbox.
+		$fakeBuyerPeppolRaw = !empty($facture->thirdparty->idprof6) ? trim($facture->thirdparty->idprof6) : '';
+		if (!empty($fakeBuyerPeppolRaw)) {
+			if (strpos($fakeBuyerPeppolRaw, ':') !== false) {
+				list($buyerScheme, $buyerPeppolId) = explode(':', $fakeBuyerPeppolRaw, 2);
+			} else {
+				$buyerScheme   = '0225';
+				$buyerPeppolId = $fakeBuyerPeppolRaw;
+			}
+			$result4 = preg_replace_callback(
+				'/<[\w:]*BuyerTradeParty\b[^>]*>.*?<\/[\w:]*BuyerTradeParty>/s',
+				function ($m) use ($buyerScheme, $buyerPeppolId) {
+					$block = $m[0];
+					$uriElem = '<ram:URIUniversalCommunication>'
+						. '<ram:URIID schemeID="'.htmlspecialchars($buyerScheme, ENT_XML1).'">'.htmlspecialchars($buyerPeppolId, ENT_XML1).'</ram:URIID>'
+						. '</ram:URIUniversalCommunication>';
+					if (preg_match('/<[\w:]*URIUniversalCommunication>/i', $block)) {
+						// Remplace l'existant (schemeID ou valeur potentiellement incorrects)
+						$block = preg_replace(
+							'/<[\w:]*URIUniversalCommunication>.*?<\/[\w:]*URIUniversalCommunication>/s',
+							$uriElem,
+							$block
+						);
+					} else {
+						// Insère avant la balise fermante
+						$block = preg_replace('/(<\/[\w:]*BuyerTradeParty>)/', $uriElem.'$1', $block);
+					}
+					return $block;
+				},
+				$patched
+			);
+			if ($result4 !== null) {
+				$patched = $result4;
+			}
+		}
 
-		dol_syslog('LemonSuperPDP [SANDBOX]: vendeur '.$realSiren.'->'.$fakeSiren.', client '.$realClientSiren.'->'.$fakeClientSiren.', envoi en CII', LOG_WARNING);
+		ini_set('pcre.backtrack_limit', $prevBacktrackLimit);
 
-		return array('tmpPath' => $tmpXmlPath, 'realSiren' => $realSiren, 'fakeSiren' => $fakeSiren);
+		// Ré-injection du XML patché dans le PDF original → envoi Factur-X PDF
+		// (les endpoints Peppol des bacs à sable n'acceptent pas le CII brut).
+		$writer = new \Atgp\FacturX\Writer();
+		$patchedPdfBinary = $writer->generate($pdfBinary, $patched, null, false);
+
+		$tmpPdfPath = tempnam(sys_get_temp_dir(), 'lemonspd_').'.pdf';
+		file_put_contents($tmpPdfPath, $patchedPdfBinary);
+
+		dol_syslog('LemonSuperPDP [SANDBOX]: vendeur SIREN '.$realSiren.'->'.$fakeSiren.', BT-34 ->'.$fakeSellerPeppol.', client '.$realClientSiren.'->'.$fakeClientSiren.', BT-49 buyer ->'.$fakeBuyerPeppolRaw.', envoi Factur-X PDF', LOG_WARNING);
+
+		return array('tmpPath' => $tmpPdfPath, 'realSiren' => $realSiren, 'fakeSiren' => $fakeSiren);
 	}
 
 	/**
@@ -822,6 +1036,7 @@ class ActionsLemonSuperPDP
 			'fk_transmission'   => $t->id,
 			'superpdp_event_id' => !empty($response['id']) ? (int) $response['id'] : null,
 			'status_code'       => $statusCode,
+			'flux'              => 'fournisseur',
 			'message'           => LemonSuperPDPEvent::getStatusLabel($statusCode),
 			'direction'         => LemonSuperPDPEvent::DIRECTION_OUT,
 			'event_date'        => dol_now(),
