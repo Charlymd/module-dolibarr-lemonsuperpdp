@@ -174,3 +174,13 @@ LemonSuperPDPRecCreateSoc = Create third party and import
 LemonSuperPDPRecCreateSocTooltip = Creates the supplier third party "%s" from the invoice data (name, SIREN/SIRET, VAT number, address), completed from the SIRENE register if the LemonSirene module is enabled, then imports the invoice as draft
 LemonSuperPDPRecSocCreated = Supplier third party created from invoice data
 LemonSuperPDPRecSocCreateFailed = Third party creation failed
+
+# Lifecycle tab (timeline)
+LemonSuperPDPLifecycleTab = Lifecycle
+LemonSuperPDPLifecycleTitle = Lifecycle
+LemonSuperPDPLastMessage = Last
+LemonSuperPDPLastMessageLine2 = message
+LemonSuperPDPNoEvent = No event
+LemonSuperPDPProgression = Progress
+LemonSuperPDPForceResend = Force resend to SUPER PDP
+LemonSuperPDPForceResendConfirm = Resend the invoice to SUPER PDP even if it was already transmitted?

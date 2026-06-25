@@ -185,3 +185,13 @@ LemonSuperPDPRecCreateSoc = Créer le tiers et importer
 LemonSuperPDPRecCreateSocTooltip = Crée le tiers fournisseur « %s » depuis les données de la facture (nom, SIREN/SIRET, TVA intra, adresse), complété via le registre SIRENE si le module LemonSirene est actif, puis importe la facture en brouillon
 LemonSuperPDPRecSocCreated = Tiers fournisseur créé depuis les données de la facture
 LemonSuperPDPRecSocCreateFailed = Échec de la création du tiers
+
+# Onglet Cycle de vie (timeline)
+LemonSuperPDPLifecycleTab = Cycle de vie
+LemonSuperPDPLifecycleTitle = Cycle de vie
+LemonSuperPDPLastMessage = Dernier
+LemonSuperPDPLastMessageLine2 = message
+LemonSuperPDPNoEvent = Aucun événement
+LemonSuperPDPProgression = Progression
+LemonSuperPDPForceResend = Forcer l'envoi vers SUPER PDP
+LemonSuperPDPForceResendConfirm = Renvoyer la facture à SUPER PDP même si elle a déjà été transmise ?
