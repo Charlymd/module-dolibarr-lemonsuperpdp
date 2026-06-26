@@ -184,6 +184,3 @@ LemonSuperPDPNoEvent = No event
 LemonSuperPDPProgression = Progress
 LemonSuperPDPForceResend = Force resend to SUPER PDP
 LemonSuperPDPForceResendConfirm = Resend the invoice to SUPER PDP even if it was already transmitted?
-
-LemonSuperPDPSeeDetail=See full detail
-LemonSuperPDPOpenTab=Open detail tab
