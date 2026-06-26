@@ -195,3 +195,6 @@ LemonSuperPDPNoEvent = Aucun événement
 LemonSuperPDPProgression = Progression
 LemonSuperPDPForceResend = Forcer l'envoi vers SUPER PDP
 LemonSuperPDPForceResendConfirm = Renvoyer la facture à SUPER PDP même si elle a déjà été transmise ?
+
+LemonSuperPDPSeeDetail=Voir le détail complet
+LemonSuperPDPOpenTab=Ouvrir l'onglet détail

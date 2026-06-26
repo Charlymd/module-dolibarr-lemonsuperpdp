@@ -173,6 +173,7 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 			'fk_transmission'   => $t->id,
 			'superpdp_event_id' => !empty($response['id']) ? (int) $response['id'] : null,
 			'status_code'       => LemonSuperPDPEvent::STATUS_ENCAISSEE,
+			'flux'              => 'fournisseur',
 			'message'           => LemonSuperPDPEvent::getStatusLabel(LemonSuperPDPEvent::STATUS_ENCAISSEE),
 			'direction'         => LemonSuperPDPEvent::DIRECTION_OUT,
 			'event_date'        => dol_now(),
