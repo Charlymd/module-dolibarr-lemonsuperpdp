@@ -23,7 +23,6 @@ class LemonSuperPDPTransmission extends CommonObject
 	public $superpdp_id;
 	public $status;
 	public $status_raw;
-	public $recipient_address;
 	public $format_sent;
 	public $error_message;
 	public $payload_response;
@@ -113,7 +112,6 @@ class LemonSuperPDPTransmission extends CommonObject
 		$this->superpdp_id = $obj->superpdp_id;
 		$this->status = $obj->status;
 		$this->status_raw = $obj->status_raw;
-		$this->recipient_address = $obj->recipient_address;
 		$this->format_sent = $obj->format_sent;
 		$this->error_message = $obj->error_message;
 		$this->payload_response = $obj->payload_response;
@@ -154,8 +152,11 @@ class LemonSuperPDPTransmission extends CommonObject
 
 	public function fetch($id)
 	{
+		global $conf;
 		$sql = "SELECT * FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
 		$sql .= " WHERE rowid = ".((int) $id);
+		// Isolation multi-entité : ne jamais charger la transmission d'une autre société.
+		$sql .= " AND entity = ".((int) $conf->entity);
 
 		$resql = $this->db->query($sql);
 		if ($resql) {
@@ -208,8 +209,10 @@ class LemonSuperPDPTransmission extends CommonObject
 	 */
 	public function fetchIdAndFactureBySuperpdpId($superpdpId)
 	{
+		global $conf;
 		$sql = "SELECT rowid, fk_facture FROM ".MAIN_DB_PREFIX."lemonsuperpdp_transmission";
 		$sql .= " WHERE superpdp_id = ".((int) $superpdpId);
+		$sql .= " AND entity = ".((int) $conf->entity);
 		$sql .= " LIMIT 1";
 
 		$resql = $this->db->query($sql);
@@ -256,7 +259,6 @@ class LemonSuperPDPTransmission extends CommonObject
 		$sql .= ", status = '".$this->db->escape($this->status)."'";
 		$sql .= ", format_sent = ".$nullOrStr($this->format_sent);
 		$sql .= ", status_raw = ".$nullOrStr($this->status_raw);
-		$sql .= ", recipient_address = ".$nullOrStr($this->recipient_address);
 		$sql .= ", error_message = ".$nullOrStr($this->error_message);
 		$sql .= ", payload_response = ".$nullOrStr($this->payload_response);
 		$sql .= ", date_status_update = '".$this->db->idate(dol_now())."'";

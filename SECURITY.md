@@ -72,7 +72,7 @@ Toute action modifiant l'état passe par une vérification `GETPOST('token', 'al
 - `dosendsuperpdp` (envoi d'une facture)
 - `dosendsuperpdp_bulk` (envoi en masse)
 - `refreshsuperpdpevents` (rafraîchir les événements)
-- `sendstatussuperpdp` (émission manuelle de statut)
+- `send_lifecycle_status` et `forcesuperpdpsend` (émission manuelle d'un statut / renvoi, onglet Cycle de vie — droit `lemonsuperpdp/transmission/ecrire` requis)
 - `resettransmissionsuperpdp` (sandbox uniquement)
 - Tous les POST de `admin/setup.php`
 

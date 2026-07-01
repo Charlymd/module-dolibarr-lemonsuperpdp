@@ -143,8 +143,11 @@ class LemonSuperPDPReception extends CommonObject
 
 	public function fetch($id)
 	{
+		global $conf;
 		$sql = "SELECT * FROM ".MAIN_DB_PREFIX."lemonsuperpdp_reception";
 		$sql .= " WHERE rowid = ".((int) $id);
+		// Isolation multi-entité : ne jamais charger une réception d'une autre société.
+		$sql .= " AND entity = ".((int) $conf->entity);
 
 		$resql = $this->db->query($sql);
 		if ($resql) {
@@ -185,8 +188,10 @@ class LemonSuperPDPReception extends CommonObject
 	 */
 	public function existsBySuperpdpId($superpdpId)
 	{
+		global $conf;
 		$sql = "SELECT rowid FROM ".MAIN_DB_PREFIX."lemonsuperpdp_reception";
 		$sql .= " WHERE superpdp_id = ".((int) $superpdpId);
+		$sql .= " AND entity = ".((int) $conf->entity);
 		$sql .= " LIMIT 1";
 		$resql = $this->db->query($sql);
 		if ($resql) {
@@ -564,7 +569,23 @@ class LemonSuperPDPReception extends CommonObject
 		} else {
 			return;
 		}
-		$ext = (strpos($content, '%PDF') === 0) ? 'pdf' : 'xml';
+
+		// Garde-fous sur le contenu (surtout la voie auto downloadInvoice, non
+		// plafonnée en amont contrairement à l'upload manuel) : taille bornée et
+		// type réel PDF/XML, pour ne pas persister sur le disque du client un blob
+		// arbitraire issu d'une réponse plateforme anormale.
+		if ($content === '' || $content === false) {
+			throw new Exception('Contenu de facture reçu vide');
+		}
+		if (strlen($content) > 10 * 1024 * 1024) {
+			throw new Exception('Fichier reçu trop volumineux (> 10 Mo), non attaché');
+		}
+		$isPdf = (strncmp($content, '%PDF', 4) === 0);
+		$isXml = (bool) preg_match('/^(?:\xEF\xBB\xBF)?\s*<(?:\?xml|[a-zA-Z])/', $content);
+		if (!$isPdf && !$isXml) {
+			throw new Exception('Format de fichier reçu non reconnu (ni PDF ni XML)');
+		}
+		$ext = $isPdf ? 'pdf' : 'xml';
 
 		$upload_dir = $conf->fournisseur->facture->dir_output.'/'.get_exdir($ff->id, 2, 0, 0, $ff, 'invoice_supplier').dol_sanitizeFileName($ff->ref);
 		if (!dol_is_dir($upload_dir)) {

@@ -33,6 +33,17 @@ if (!$user->admin) {
 
 $langs->loadLangs(["admin", "lemonsuperpdp@lemonsuperpdp"]);
 
+// Migration : re-chiffre en place les secrets stockés en clair par les versions
+// antérieures au chiffrement (< 1.2.2). dolDecrypt renvoie la valeur inchangée
+// si elle n'est pas chiffrée → on détecte ainsi le clair et on le re-chiffre,
+// sans intervention. Idempotent (à la visite suivante, le clair a disparu).
+foreach (array('LEMONSUPERPDP_CLIENT_SECRET', 'LEMONSUPERPDP_ACCESS_TOKEN') as $lspdpSecretConst) {
+	$lspdpStored = getDolGlobalString($lspdpSecretConst, '');
+	if ($lspdpStored !== '' && dolDecrypt($lspdpStored) === $lspdpStored) {
+		dolibarr_set_const($db, $lspdpSecretConst, dolEncrypt($lspdpStored), 'chaine', 0, '', $conf->entity);
+	}
+}
+
 $action = GETPOST('action', 'aZ09');
 
 // Sauvegarde des paramètres
@@ -77,9 +88,10 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	if (dolibarr_set_const($db, 'LEMONSUPERPDP_CLIENT_ID', $clientId, 'chaine', 0, '', $conf->entity) < 0) {
 		$error++;
 	}
-	// Ne pas écraser le secret si l'utilisateur a laissé les étoiles
+	// Ne pas écraser le secret si l'utilisateur a laissé les étoiles.
+	// Chiffré au repos (dolEncrypt) : jamais de client_secret en clair dans llx_const.
 	if ($clientSecret !== '' && $clientSecret !== '********') {
-		if (dolibarr_set_const($db, 'LEMONSUPERPDP_CLIENT_SECRET', $clientSecret, 'chaine', 0, '', $conf->entity) < 0) {
+		if (dolibarr_set_const($db, 'LEMONSUPERPDP_CLIENT_SECRET', dolEncrypt($clientSecret), 'chaine', 0, '', $conf->entity) < 0) {
 			$error++;
 		}
 	}

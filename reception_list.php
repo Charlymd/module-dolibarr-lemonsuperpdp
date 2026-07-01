@@ -338,6 +338,20 @@ $canWrite = $user->hasRight('lemonsuperpdp', 'reception', 'ecrire');
 
 $i = 0;
 $imax = min($num, $limit);
+// Liste des fournisseurs pré-chargée UNE fois (au lieu d'un select_company()
+// — donc une requête SQL + un <select> complet — par ligne en quarantaine).
+$lspSupplierList = array();
+$lspSqlSup  = "SELECT rowid, nom FROM ".MAIN_DB_PREFIX."societe";
+$lspSqlSup .= " WHERE fournisseur = 1 AND status = 1 AND entity IN (".getEntity('societe').")";
+$lspSqlSup .= " ORDER BY nom";
+$lspResSup = $db->query($lspSqlSup);
+if ($lspResSup) {
+	while ($oSup = $db->fetch_object($lspResSup)) {
+		$lspSupplierList[(int) $oSup->rowid] = $oSup->nom;
+	}
+	$db->free($lspResSup);
+}
+
 while ($i < $imax) {
 	$obj = $db->fetch_object($resql);
 	$i++;
@@ -413,7 +427,15 @@ while ($i < $imax) {
 	if ($canWrite && in_array($obj->status, array(LemonSuperPDPReception::STATUS_QUARANTINE, LemonSuperPDPReception::STATUS_ERROR, LemonSuperPDPReception::STATUS_NEW, LemonSuperPDPReception::STATUS_IGNORED), true)) {
 		// Choix du tiers (composant natif, pré-rempli si déjà résolu) + import
 		print '<div class="nowrap inline-block">';
-		print $form->select_company((int) $obj->fk_soc, 'socid_'.((int) $obj->rowid), 's.fournisseur = 1', 'LemonSuperPDPRecChooseSupplier', 0, 0, array(), 0, 'maxwidth150');
+		$lspRid = (int) $obj->rowid;
+		$lspSelSoc = (int) $obj->fk_soc;
+		$lspSel  = '<select id="socid_'.$lspRid.'" name="socid_'.$lspRid.'" class="flat maxwidth150">';
+		$lspSel .= '<option value="-1">&nbsp;'.dol_escape_htmltag($langs->trans('LemonSuperPDPRecChooseSupplier')).'</option>';
+		foreach ($lspSupplierList as $lspSid => $lspNom) {
+			$lspSel .= '<option value="'.$lspSid.'"'.($lspSid === $lspSelSoc ? ' selected' : '').'>'.dol_escape_htmltag($lspNom).'</option>';
+		}
+		$lspSel .= '</select>';
+		print $lspSel;
 		print ' <a class="butActionSmall lemonsuperpdp-import" data-recid="'.((int) $obj->rowid).'" href="'.$_SERVER["PHP_SELF"].'?action=import&id='.((int) $obj->rowid).'&token='.newToken().$param.'">'.$langs->trans('LemonSuperPDPRecImport').'</a>';
 		// Pas de tiers résolu mais un nom dans le XML : proposer la création en un clic
 		if (empty($obj->fk_soc) && !empty($obj->supplier_name)) {

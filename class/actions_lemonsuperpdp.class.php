@@ -286,15 +286,15 @@ class ActionsLemonSuperPDP
 
 	/**
 	 * Intercepte les actions du module : dosendsuperpdp (envoi),
-	 * refreshsuperpdpevents (rafraîchir events), sendstatussuperpdp
-	 * (émettre un statut manuel) et resettransmissionsuperpdp (reset sandbox).
+	 * refreshsuperpdpevents (rafraîchir events) et resettransmissionsuperpdp
+	 * (reset sandbox).
 	 */
 	public function doActions($parameters, &$object, &$action, $hookmanager)
 	{
 		global $langs;
 
-		// Les 4 actions exigent toutes module activé + objet facture.
-		if (!in_array($action, array('refreshsuperpdpevents', 'sendstatussuperpdp', 'resettransmissionsuperpdp', 'dosendsuperpdp'), true)) {
+		// Ces actions exigent toutes module activé + objet facture.
+		if (!in_array($action, array('refreshsuperpdpevents', 'resettransmissionsuperpdp', 'dosendsuperpdp'), true)) {
 			return 0;
 		}
 		if (!isModEnabled('lemonsuperpdp')) return 0;
@@ -304,8 +304,6 @@ class ActionsLemonSuperPDP
 		switch ($action) {
 			case 'refreshsuperpdpevents':
 				return $this->handleRefreshEvents($object, $action);
-			case 'sendstatussuperpdp':
-				return $this->handleSendStatus($object, $action);
 			// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
 			case 'resettransmissionsuperpdp':
 				return $this->handleResetTransmission($object, $action);
@@ -333,33 +331,6 @@ class ActionsLemonSuperPDP
 		} catch (Exception $e) {
 			dol_syslog('LemonSuperPDP refresh events: '.$e->getMessage(), LOG_ERR);
 			setEventMessages($langs->trans('LemonSuperPDPRefreshError').' — '.$e->getMessage(), null, 'errors');
-		}
-		$action = '';
-		return 0;
-	}
-
-	/**
-	 * Émet manuellement un statut de cycle de vie (fr:204..fr:212).
-	 */
-	private function handleSendStatus(&$object, &$action)
-	{
-		global $langs, $user;
-
-		if (!$this->checkCsrfAndRight($action, 'ecrire')) return 0;
-
-		$statusCode = GETPOST('status_code', 'alphanohtml');
-		dol_include_once('/lemonsuperpdp/class/event.class.php');
-		if (!in_array($statusCode, LemonSuperPDPEvent::getEmittableStatuses(), true)) {
-			setEventMessages($langs->trans('LemonSuperPDPStatusInvalid').' : '.dol_escape_htmltag($statusCode), null, 'errors');
-			$action = '';
-			return 0;
-		}
-		try {
-			$this->sendManualStatus($object, $user, $statusCode);
-			setEventMessages($langs->trans('LemonSuperPDPStatusSent').' : '.$statusCode, null, 'mesgs');
-		} catch (Exception $e) {
-			dol_syslog('LemonSuperPDP send status: '.$e->getMessage(), LOG_ERR);
-			setEventMessages($langs->trans('LemonSuperPDPStatusSendError').' — '.$e->getMessage(), null, 'errors');
 		}
 		$action = '';
 		return 0;
@@ -1006,47 +977,4 @@ class ActionsLemonSuperPDP
 		return $result['inserted'];
 	}
 
-	/**
-	 * Envoie un statut de cycle de vie manuellement. Pour fr:212 et fr:207,
-	 * construit automatiquement les montants ventilés par taux TVA à partir
-	 * des lignes de la facture.
-	 */
-	public function sendManualStatus($facture, $user, $statusCode)
-	{
-		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
-		dol_include_once('/lemonsuperpdp/class/event.class.php');
-		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
-
-		$t = new LemonSuperPDPTransmission($this->db);
-		if ($t->fetchLastByFacture($facture->id) <= 0 || empty($t->superpdp_id)) {
-			throw new Exception('Aucune transmission avec ID SUPER PDP pour cette facture');
-		}
-
-		$details = array();
-		if ($statusCode === LemonSuperPDPEvent::STATUS_ENCAISSEE
-			|| $statusCode === LemonSuperPDPEvent::STATUS_APPROUVEE_PARTIELLE) {
-			$amounts = LemonSuperPDPTransmission::buildAmountsByVatRate($facture, date('Y-m-d'));
-			$details = array(array('amounts' => $amounts));
-		}
-
-		$client = new SuperPDPClient($this->db);
-		$response = $client->submitEvent((int) $t->superpdp_id, $statusCode, $details);
-
-		LemonSuperPDPEvent::createAndLog($this->db, array(
-			'fk_transmission'   => $t->id,
-			'superpdp_event_id' => !empty($response['id']) ? (int) $response['id'] : null,
-			'status_code'       => $statusCode,
-			'flux'              => 'fournisseur',
-			'message'           => LemonSuperPDPEvent::getStatusLabel($statusCode),
-			'direction'         => LemonSuperPDPEvent::DIRECTION_OUT,
-			'event_date'        => dol_now(),
-			'payload_raw'       => json_encode($response),
-		), $user, $facture->id);
-
-		if ($statusCode === LemonSuperPDPEvent::STATUS_ENCAISSEE) {
-			$t->status = LemonSuperPDPTransmission::STATUS_PAID;
-		}
-		$t->status_raw = $statusCode;
-		$t->update($user);
-	}
 }

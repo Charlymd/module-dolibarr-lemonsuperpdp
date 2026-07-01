@@ -82,7 +82,7 @@ dol_include_once('/lemonsuperpdp/class/transmission.class.php');
 $langs->loadLangs(array('bills', 'lemonsuperpdp@lemonsuperpdp'));
 
 // ── Paramètres ──────────────────────────────────────────────────────────────
-$id     = GETPOST('id', 'int');
+$id     = GETPOSTINT('id');
 $ref    = GETPOST('ref', 'alpha');
 $action = GETPOST('action', 'alphanohtml');
 
@@ -93,15 +93,24 @@ if (!isModEnabled('facture')) {
 if (method_exists($user, 'hasRight')) {
     $canRead  = $user->hasRight('facture', 'lire');
     $canWrite = $user->hasRight('facture', 'creer');
+    // Les actions vers la Plateforme Agréée (renvoi, émission de statut de cycle
+    // de vie) exigent le droit métier du module — pas seulement facture/creer —
+    // en cohérence avec reception_list.php et ereporting_list.php.
+    $canTransmitRead  = $user->hasRight('lemonsuperpdp', 'transmission', 'lire');
+    $canTransmitWrite = $user->hasRight('lemonsuperpdp', 'transmission', 'ecrire');
 } else {
     $canRead  = !empty($user->rights->facture->lire);
     $canWrite = !empty($user->rights->facture->creer);
+    $canTransmitRead  = !empty($user->rights->lemonsuperpdp->transmission->lire);
+    $canTransmitWrite = !empty($user->rights->lemonsuperpdp->transmission->ecrire);
 }
 if (!empty($user->admin)) {
     $canRead = true;
     $canWrite = true;
+    $canTransmitRead = true;
+    $canTransmitWrite = true;
 }
-if (!$canRead) {
+if (!$canRead || !$canTransmitRead) {
     accessforbidden('', 0, 0, 1);
 }
 
@@ -120,7 +129,7 @@ if (empty($ret) || $ret < 0) {
 $fk = (int) $object->id;
 
 // ── Action POST ──────────────────────────────────────────────────────────────
-if ($action === 'forcesuperpdpsend' && $canWrite) {
+if ($action === 'forcesuperpdpsend' && $canTransmitWrite) {
     if (GETPOST('token', 'alpha') !== currentToken()) {
         setEventMessages('Bad CSRF token', null, 'errors');
     } else {
@@ -150,7 +159,7 @@ if ($action === 'lemonfacturx_verify' && $canRead) {
     exit;
 }
 
-if ($action === 'send_lifecycle_status' && $canWrite) {
+if ($action === 'send_lifecycle_status' && $canTransmitWrite) {
     if (GETPOST('token', 'alpha') !== currentToken()) {
         setEventMessages('Erreur CSRF.', null, 'errors');
     } else {
@@ -221,12 +230,6 @@ if ($resq) {
     }
     $db->free($resq);
 }
-
-// ── Injection event d'erreur de transmission ─────────────────────────────────
-// Si la transmission est en erreur, on crée un événement synthétique 'ERROR'
-// dans le flux PA pour qu'il apparaisse dans la timeline et la colonne PDP/PA.
-// Les erreurs de transmission sont désormais enregistrées comme événements REJECT
-// dans llx_lemonsuperpdp_event — plus besoin d'injecter un event synthétique ERROR.
 
 // ── Dernier event par flux ───────────────────────────────────────────────────
 $last = array('fournisseur' => null, 'pdp' => null, 'client' => null);
@@ -421,7 +424,7 @@ print '<div class="fichecenter">';
       Vérifier la Factur-X
     </a>
     <?php endif; ?>
-    <?php if ($canWrite && getDolGlobalInt('LEMONSUPERPDP_ENABLED')): ?>
+    <?php if ($canTransmitWrite && getDolGlobalInt('LEMONSUPERPDP_ENABLED')): ?>
     <a class="butAction" href="<?php echo dol_escape_htmltag(dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1).'?id='.$fk.'&action=forcesuperpdpsend&token='.newToken()); ?>"
        onclick="return confirm('<?php echo dol_escape_js($langs->trans('LemonSuperPDPForceResendConfirm')); ?>');">
       &#x21BA; <?php echo $langs->trans('LemonSuperPDPForceResend'); ?>
@@ -429,7 +432,7 @@ print '<div class="fichecenter">';
     <?php endif; ?>
   </div>
   <?php endif; ?>
-  <?php if ($canWrite && !empty($allowed)): ?>
+  <?php if ($canTransmitWrite && !empty($allowed)): ?>
   <div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid #e0ddd6;margin-top:4px;">
     <form method="post" action="<?php echo dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1); ?>?id=<?php echo $fk; ?>"
           style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;">

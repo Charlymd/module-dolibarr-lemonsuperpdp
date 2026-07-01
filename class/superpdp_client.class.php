@@ -13,6 +13,7 @@
  */
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';  // dolibarr_set_const
+require_once DOL_DOCUMENT_ROOT.'/core/lib/security2.lib.php';  // dolEncrypt / dolDecrypt (secret + token chiffrés au repos)
 
 /**
  * Exception levée lors d'un échec d'appel à l'API SUPER PDP.
@@ -53,7 +54,9 @@ class SuperPDPClient
 		$this->db = $db;
 		$this->endpoint = rtrim(getDolGlobalString('LEMONSUPERPDP_ENDPOINT', 'https://api.superpdp.tech'), '/');
 		$this->clientId = getDolGlobalString('LEMONSUPERPDP_CLIENT_ID', '');
-		$this->clientSecret = getDolGlobalString('LEMONSUPERPDP_CLIENT_SECRET', '');
+		// Secret chiffré au repos : dolDecrypt renvoie la valeur telle quelle si
+		// elle n'est pas chiffrée (compat des installs antérieures au chiffrement).
+		$this->clientSecret = dolDecrypt(getDolGlobalString('LEMONSUPERPDP_CLIENT_SECRET', ''));
 	}
 
 	/**
@@ -68,7 +71,7 @@ class SuperPDPClient
 			throw new SuperPDPException('Identifiants OAuth non configurés (LEMONSUPERPDP_CLIENT_ID / _SECRET)');
 		}
 
-		$cached = getDolGlobalString('LEMONSUPERPDP_ACCESS_TOKEN', '');
+		$cached = dolDecrypt(getDolGlobalString('LEMONSUPERPDP_ACCESS_TOKEN', ''));
 		if (!empty($cached)) {
 			$decoded = json_decode($cached, true);
 			if (is_array($decoded) && !empty($decoded['access_token']) && !empty($decoded['expires_at'])) {
@@ -127,7 +130,9 @@ class SuperPDPClient
 			'access_token' => $data['access_token'],
 			'expires_at' => time() + $expiresIn,
 		));
-		dolibarr_set_const($this->db, 'LEMONSUPERPDP_ACCESS_TOKEN', $cache, 'chaine', 0, '', $conf->entity);
+		// Cache chiffré au repos : un Bearer valide en clair dans llx_const est
+		// directement réutilisable jusqu'à expiration.
+		dolibarr_set_const($this->db, 'LEMONSUPERPDP_ACCESS_TOKEN', dolEncrypt($cache), 'chaine', 0, '', $conf->entity);
 
 		return $data['access_token'];
 	}
@@ -404,6 +409,10 @@ class SuperPDPClient
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_TIMEOUT, (int) $timeout);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+		// Vérification TLS forcée explicitement (ce chemin porte le client_secret
+		// et le Bearer) — ne pas dépendre du défaut libcurl de l'hôte client.
+		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+		curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
 		if ($body !== null) {
 			curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
 		}
