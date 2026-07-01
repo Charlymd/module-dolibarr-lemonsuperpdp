@@ -8,7 +8,7 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Statut
 
-Version 1.0.1 — phase pilote SUPER PDP. Fonctionnalités :
+Version 1.2.1 — phase pilote SUPER PDP. Fonctionnalités :
 
 - **Réception des factures fournisseurs** : polling de l'API (`direction=in`), rattachement automatique du tiers par SIREN/SIRET, création de la facture fournisseur Dolibarr **en brouillon** (jamais auto-validée) avec lignes, remises/frais de pied de document et fichier original (PDF Factur-X ou XML) attaché ; écran « Factur-X reçues » avec quarantaine pour les tiers introuvables ou ambigus et les devises étrangères
 - **Import manuel** d'un fichier Factur-X (PDF) ou XML (CII/UBL) reçu hors plateforme (par mail pendant la transition) : conversion par l'API SUPER PDP, même pipeline que le polling
