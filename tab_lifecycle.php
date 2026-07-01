@@ -8,58 +8,20 @@
  */
 
 // ── Chargement Dolibarr ─────────────────────────────────────────────────────
-// Ce fichier est dans htdocs/custom/lemonsuperpdp/
-// main.inc.php est dans htdocs/ soit deux niveaux au-dessus.
+// Deux tentatives minimum (module à la racine htdocs/ OU dans custom/),
+// conformément aux règles de packaging Dolibarr/Dolistore.
 $res = 0;
-
-// Méthode 1 : DOCUMENT_ROOT Apache (le plus fiable sur Apache standard)
-if (!$res && !empty($_SERVER['DOCUMENT_ROOT'])) {
-    $f = rtrim($_SERVER['DOCUMENT_ROOT'], '/') . '/main.inc.php';
-    if (file_exists($f)) {
-        $res = @include $f;
-    }
+if (!$res && file_exists("../main.inc.php")) {
+    $res = @include "../main.inc.php";
 }
-
-// Méthode 2 : CONTEXT_DOCUMENT_ROOT (mod_php avec alias)
-if (!$res && !empty($_SERVER['CONTEXT_DOCUMENT_ROOT'])) {
-    $f = rtrim(str_replace('..', '', $_SERVER['CONTEXT_DOCUMENT_ROOT']), '/') . '/main.inc.php';
-    if (file_exists($f)) {
-        $res = @include $f;
-    }
+if (!$res && file_exists("../../main.inc.php")) {
+    $res = @include "../../main.inc.php";
 }
-
-// Méthode 3 : remontée depuis __FILE__
-// htdocs/custom/lemonsuperpdp/tab_lifecycle.php → ../../ = htdocs/
+if (!$res && file_exists("../../../main.inc.php")) {
+    $res = @include "../../../main.inc.php";
+}
 if (!$res) {
-    $f = dirname(__FILE__) . '/../../main.inc.php';
-    if (file_exists($f)) {
-        $res = @include $f;
-    }
-}
-
-// Méthode 4 : remontée supplémentaire (si custom/ est dans un sous-dossier)
-if (!$res) {
-    $f = dirname(__FILE__) . '/../../../main.inc.php';
-    if (file_exists($f)) {
-        $res = @include $f;
-    }
-}
-
-// Méthode 5 : SCRIPT_FILENAME — boucle sur les parents
-if (!$res && !empty($_SERVER['SCRIPT_FILENAME'])) {
-    $tmp = realpath($_SERVER['SCRIPT_FILENAME']);
-    $dir = dirname($tmp);
-    for ($lvl = 0; $lvl < 6; $lvl++) {
-        $dir = dirname($dir);
-        if (file_exists($dir . '/main.inc.php')) {
-            $res = @include $dir . '/main.inc.php';
-            if ($res) break;
-        }
-    }
-}
-
-if (!$res) {
-    die('LemonSuperPDP : impossible de charger main.inc.php — vérifiez le chemin d\'installation.');
+    die("Include of main fails");
 }
 
 // ── Includes Dolibarr ───────────────────────────────────────────────────────
