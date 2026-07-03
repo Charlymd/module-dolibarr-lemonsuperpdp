@@ -435,15 +435,24 @@ class LemonSuperPDPReception extends CommonObject
 
 		$this->db->begin();
 
+		// BR-FR-04 : liste fermée des codes types de documents (norme XP Z12-012,
+		// chap. 4.5.1). On mappe le sens comptable réel plutôt que le seul code 381,
+		// sinon les autres avoirs (261, 262, 396, 502, 503) sont importés en facture
+		// standard positive, ce qui inverse silencieusement le sens comptable.
+		list($ffType, $typeCodeNote) = $this->resolveInvoiceTypeFromCode($this->invoice_type_code);
+
 		$ff = new FactureFournisseur($this->db);
 		$ff->socid = $targetSoc;
-		$ff->type = ((string) $this->invoice_type_code === '381') ? FactureFournisseur::TYPE_CREDIT_NOTE : FactureFournisseur::TYPE_STANDARD;
+		$ff->type = $ffType;
 		$ff->ref_supplier = !empty($this->invoice_number) ? $this->invoice_number : 'SUPERPDP-'.((int) $this->superpdp_id);
 		$ff->date = !empty($this->invoice_date) ? $this->invoice_date : dol_now();
 		$ff->date_echeance = !empty($this->due_date) ? $this->due_date : '';
 		$ff->note_private = ($this->source === self::SOURCE_MANUAL)
 			? 'Importée manuellement (fichier Factur-X/XML converti via SUPER PDP). À vérifier avant validation.'
 			: 'Importée automatiquement depuis SUPER PDP (facture plateforme n° '.((int) $this->superpdp_id).'). À vérifier avant validation.';
+		if ($typeCodeNote !== '') {
+			$ff->note_private .= "\n".$typeCodeNote;
+		}
 
 		$ffid = $ff->create($user);
 		if ($ffid <= 0) {
@@ -508,6 +517,47 @@ class LemonSuperPDPReception extends CommonObject
 		$this->update($user);
 
 		return $ffid;
+	}
+
+	/**
+	 * Résout le type de FactureFournisseur et une note complémentaire à partir
+	 * du code type de document reçu (BT-3 côté EN16931, invoice_type_code ici),
+	 * selon la liste fermée BR-FR-04 (norme XP Z12-012, chap. 4.5.1) :
+	 * - Factures simples (380, 389, 393, 501) et rectificatives (384, 471, 472, 473)
+	 *   → standard, sans note.
+	 * - Avoirs (261, 262, 381, 396, 502, 503) → TYPE_CREDIT_NOTE (sens comptable
+	 *   négatif). Seul 381 était mappé avant correctif : les 5 autres tombaient
+	 *   en standard positif, inversant silencieusement le sens comptable.
+	 * - Acomptes (386, 500) → standard, mais avec une note visible pour que le
+	 *   comptable traite l'acompte manuellement (Dolibarr n'a pas de flux acompte
+	 *   fournisseur automatisé équivalent au flux client).
+	 * - Code absent de la liste fermée (hors UNTDID 1001 autorisé par la norme,
+	 *   ou type_code manquant) → standard, avec note de mise en garde. La PA a
+	 *   déjà validé la facture en amont : on n'importe donc jamais en bloquant.
+	 *
+	 * @param  string|null $typeCode Code type de document (BT-3), tel que reçu de la PA
+	 * @return array{0:int,1:string}  [type FactureFournisseur::TYPE_*, note à ajouter (peut être vide)]
+	 */
+	private function resolveInvoiceTypeFromCode($typeCode)
+	{
+		$code = (string) $typeCode;
+
+		$creditNoteCodes = array('261', '262', '381', '396', '502', '503');
+		if (in_array($code, $creditNoteCodes, true)) {
+			return array(FactureFournisseur::TYPE_CREDIT_NOTE, '');
+		}
+
+		$depositCodes = array('386', '500');
+		if (in_array($code, $depositCodes, true)) {
+			return array(FactureFournisseur::TYPE_STANDARD, 'Acompte — type '.$code.'. Importée en facture standard : à requalifier manuellement (acompte fournisseur, pas de flux Dolibarr dédié).');
+		}
+
+		$knownStandardCodes = array('380', '389', '393', '501', '384', '471', '472', '473');
+		if (in_array($code, $knownStandardCodes, true)) {
+			return array(FactureFournisseur::TYPE_STANDARD, '');
+		}
+
+		return array(FactureFournisseur::TYPE_STANDARD, 'Type de document inconnu ou hors liste fermée BR-FR-04 ('.($code !== '' ? $code : 'absent').') : importée en facture standard, à vérifier manuellement.');
 	}
 
 	/**
@@ -808,9 +858,11 @@ class LemonSuperPDPReception extends CommonObject
 	 * @param string              $statusCode  Code AFNOR fr:2xx
 	 * @param SuperPDPClient|null $client      Client API (instancié si null)
 	 * @param array               $details     Détails optionnels (montants...)
+	 * @param string              $reasonCode  Code motif normalisé (MDT-113) — tracé dans la note agenda
+	 * @param string              $reasonText  Motif en texte libre (MDT-114) — tracé dans la note agenda
 	 * @return int  1 OK, -1 KO ($this->error renseigné)
 	 */
-	public function sendLifecycleEvent($user, $statusCode, $client = null, $details = array())
+	public function sendLifecycleEvent($user, $statusCode, $client = null, $details = array(), $reasonCode = '', $reasonText = '')
 	{
 		if (empty($this->superpdp_id)) {
 			$this->error = 'Réception sans identifiant SUPER PDP (import manuel) : statut non transmissible';
@@ -841,7 +893,18 @@ class LemonSuperPDPReception extends CommonObject
 			$ac->type_code = 'AC_OTH_AUTO';
 			$ac->code = 'LEMONSUPERPDP_'.strtoupper(str_replace(array(':', '-'), '_', $statusCode));
 			$ac->label = 'SUPER PDP : '.$label.' ('.$statusCode.') (émis)';
-			$ac->note_private = 'Statut '.$statusCode.' émis vers SUPER PDP pour la facture reçue n° '.((int) $this->superpdp_id)."\n\nRéponse :\n".json_encode($response);
+			$note = 'Statut '.$statusCode.' émis vers SUPER PDP pour la facture reçue n° '.((int) $this->superpdp_id);
+			// Motif du statut (MDT-113/MDT-114) : la table réception ne porte pas
+			// de colonnes reason_* — la note agenda est le support de persistance
+			// du motif côté flux acheteur (même format que createActionComm()).
+			if ((string) $reasonCode !== '' || (string) $reasonText !== '') {
+				$motifParts = array();
+				if ((string) $reasonCode !== '') $motifParts[] = (string) $reasonCode;
+				if ((string) $reasonText !== '') $motifParts[] = (string) $reasonText;
+				$note .= "\nMotif : ".implode(' — ', $motifParts);
+			}
+			$note .= "\n\nRéponse :\n".json_encode($response);
+			$ac->note_private = $note;
 			$ac->elementtype = 'invoice_supplier';
 			$ac->fk_element = (int) $this->fk_facture_fourn;
 			$ac->datep = dol_now();

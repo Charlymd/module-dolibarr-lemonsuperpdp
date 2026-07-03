@@ -160,7 +160,8 @@ LemonSuperPDPRecAccept = Approuver
 LemonSuperPDPRecRefuse = Refuser
 LemonSuperPDPRecRefuseConfirm = Envoyer le statut Refusée (fr:210) au fournisseur via la plateforme ?
 LemonSuperPDPRecLifecycleSent = Statut %s transmis à la plateforme
-LemonSuperPDPNotRoutable = Le destinataire (SIREN %s) n'a pas d'adresse électronique active dans l'annuaire des Plateformes Agréées : il ne peut pas recevoir de facture électronique. Vérifiez le SIRET du tiers ou attendez son raccordement à une plateforme.
+LemonSuperPDPNotRoutable = Le destinataire (SIREN %s) est absent de l'annuaire des Plateformes Agréées : il ne peut pas recevoir de facture électronique. Vérifiez le SIRET du tiers ou attendez son raccordement à une plateforme.
+LemonSuperPDPNotRoutableNonTransmise = Le destinataire (SIREN %s) est présent dans l'annuaire des Plateformes Agréées mais n'a choisi aucune ligne d'adressage active (motif NON_TRANSMISE) : il ne peut pas recevoir de facture électronique tant qu'il n'a pas sélectionné sa Plateforme Agréée de réception.
 LemonSuperPDPPrecheckDirectory = Vérifier l'annuaire avant envoi
 LemonSuperPDPPrecheckDirectoryHelp = Avant chaque envoi, interroge l'annuaire des Plateformes Agréées pour vérifier que le destinataire est joignable, avec un message clair en cas d'échec. Désactivé automatiquement en mode sandbox.
 LemonSuperPDPMenuEreporting = E-reporting B2C (SUPER PDP)
@@ -195,3 +196,29 @@ LemonSuperPDPNoEvent = Aucun événement
 LemonSuperPDPProgression = Progression
 LemonSuperPDPForceResend = Forcer l'envoi vers SUPER PDP
 LemonSuperPDPForceResendConfirm = Renvoyer la facture à SUPER PDP même si elle a déjà été transmise ?
+
+# Conformité cycle de vie XP Z12-012 — libellés officiels des statuts (BR-FR-CDV-CL-05)
+LemonSuperPDPFrStatusfr200 = Déposée
+LemonSuperPDPFrStatusfr201 = Émise par la plateforme
+LemonSuperPDPFrStatusfr202 = Reçue par la plateforme
+LemonSuperPDPFrStatusfr203 = Mise à disposition
+LemonSuperPDPFrStatusfr204 = Prise en charge
+LemonSuperPDPFrStatusfr205 = Approuvée
+LemonSuperPDPFrStatusfr206 = Approuvée partiellement
+LemonSuperPDPFrStatusfr207 = En litige
+LemonSuperPDPFrStatusfr208 = Suspendue
+LemonSuperPDPFrStatusfr209 = Complétée
+LemonSuperPDPFrStatusfr210 = Refusée
+LemonSuperPDPFrStatusfr211 = Paiement transmis
+LemonSuperPDPFrStatusfr212 = Encaissée
+LemonSuperPDPFrStatusfr213 = Rejetée
+LemonSuperPDPFrStatusfr501 = Irrecevable
+
+# Motifs de statut (MDT-113 / MDT-114, règle BR-FR-CDV-15)
+LemonSuperPDPReasonCode = Code motif
+LemonSuperPDPReasonText = Commentaire (texte libre, conservé en local)
+LemonSuperPDPReasonCodePlaceholder = Code motif (MDT-113)
+LemonSuperPDPReasonTextPlaceholder = Commentaire libre (optionnel)
+LemonSuperPDPReasonRequired = Le statut %s exige un motif (code MDT-113) : saisissez un code motif avant l'envoi (règle BR-FR-CDV-15 de la norme XP Z12-012).
+LemonSuperPDPReasonRequiredJs = Ce statut exige un code motif (règle BR-FR-CDV-15). Merci de le renseigner avant l'envoi.
+LemonSuperPDPRecRefuseTitle = Refuser la facture reçue (fr:210)

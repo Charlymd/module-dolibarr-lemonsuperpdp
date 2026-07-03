@@ -126,19 +126,43 @@ if ($action === 'send_lifecycle_status' && $canTransmitWrite) {
         setEventMessages('Erreur CSRF.', null, 'errors');
     } else {
         $status_code = GETPOST('lifecycle_status', 'alphanohtml');
+        $reason_code = trim(GETPOST('lifecycle_reason_code', 'alphanohtml'));
+        $reason_text = trim(GETPOST('lifecycle_reason', 'alphanohtml'));
         $allowed_out = lsp_allowed_outgoing($fk, $db);
         if (!array_key_exists($status_code, $allowed_out)) {
             setEventMessages('Statut non autorisé.', null, 'errors');
+        } elseif (LemonSuperPDPEvent::statusRequiresReason($status_code) && $reason_code === '') {
+            // BR-FR-CDV-15 : motif obligatoire pour fr:206/207/208/210/213/501
+            setEventMessages($langs->trans('LemonSuperPDPReasonRequired', $status_code), null, 'errors');
         } else {
             dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
             $t = new LemonSuperPDPTransmission($db);
             if ($t->fetchLastByFacture($fk) > 0 && !empty($t->superpdp_id)) {
                 try {
+                    // Détails de l'event (schéma invoice_event_detail SUPER PDP) :
+                    // motif (MDT-113) dans details[].reason quand fourni, et
+                    // montants MEN TTC ventilés par taux de TVA pour fr:212
+                    // (BR-FR-CDV-14), comme le fait le trigger BILL_PAYED.
+                    $detail = array();
+                    if ($reason_code !== '') {
+                        $detail['reason'] = $reason_code;
+                    }
+                    if ($status_code === LemonSuperPDPEvent::STATUS_ENCAISSEE) {
+                        $detail['amounts'] = LemonSuperPDPTransmission::buildAmountsByVatRate($object, lsp_last_payment_date($fk, $db));
+                    }
+                    $details = !empty($detail) ? array($detail) : array();
+
                     $client = new SuperPDPClient($db);
-                    $response = $client->submitEvent((int) $t->superpdp_id, $status_code, array());
+                    $response = $client->submitEvent((int) $t->superpdp_id, $status_code, $details);
                     LemonSuperPDPEvent::createAndLog($db, array(
                         'fk_transmission' => $t->id,
+                        // ID de l'event retourné par la PA (schéma event, champ id requis) :
+                        // indispensable pour que le polling déduplique via existsBySuperpdpId()
+                        // et ne ré-importe pas cet event en direction=in.
+                        'superpdp_event_id' => (!empty($response['id']) ? (int) $response['id'] : null),
                         'status_code'     => $status_code,
+                        'reason_code'     => ($reason_code !== '' ? $reason_code : null),
+                        'reason'          => ($reason_text !== '' ? $reason_text : null),
                         'flux'            => 'fournisseur',
                         'message'         => lsp_label($status_code),
                         'direction'       => LemonSuperPDPEvent::DIRECTION_OUT,
@@ -203,14 +227,16 @@ foreach (array_reverse($events_raw) as $evt) {
 }
 
 // ── Progression ──────────────────────────────────────────────────────────────
+// Sémantique XP Z12-012 : fr:200..fr:203 = transmission (plateformes),
+// fr:204..fr:211 = traitement (acheteur), fr:212 = encaissée.
 $fc   = $last['fournisseur'] ? $last['fournisseur']->status_code : '';
 $cc   = $last['client']      ? $last['client']->status_code      : '';
 $step = 0;
-if ($fc === 'fr:204') $step = 1;
-if ($fc === 'fr:205') $step = 2;
-if (in_array($cc, array('fr:206', 'fr:207', 'fr:210', 'fr:211'), true)) $step = 3;
-if (in_array($cc, array('fr:208', 'fr:209'), true)) $step = 4;
-if ($cc === 'fr:212') $step = 5;
+if (in_array($fc, array('fr:200', 'fr:201', 'fr:202'), true)) $step = 1;
+if ($fc === 'fr:203' || $cc === 'fr:204') $step = 2;
+if (in_array($cc, array('fr:205', 'fr:206', 'fr:207', 'fr:208', 'fr:210'), true)) $step = 3;
+if ($cc === 'fr:211') $step = 4;
+if ($fc === 'fr:212' || $cc === 'fr:212') $step = 5;
 
 // ── Données SVG ──────────────────────────────────────────────────────────────
 $svg_events = array();
@@ -401,13 +427,52 @@ print '<div class="fichecenter">';
       <input type="hidden" name="action" value="send_lifecycle_status">
       <input type="hidden" name="token" value="<?php echo newToken(); ?>">
       <label style="font-size:12px;color:#5f5e5a;white-space:nowrap;">&#x2709; Émettre vers la PA :</label>
-      <select name="lifecycle_status" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid #d3d1c7;flex:1;min-width:260px;max-width:380px;">
+      <select name="lifecycle_status" id="lsp_status_select" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid #d3d1c7;flex:1;min-width:260px;max-width:380px;">
         <option value="">— Choisir un statut —</option>
         <?php foreach ($allowed as $code => $lbl): ?>
-        <option value="<?php echo dol_escape_htmltag($code); ?>"><?php echo dol_escape_htmltag($code . ' — ' . $lbl); ?></option>
+        <option value="<?php echo dol_escape_htmltag($code); ?>"<?php echo LemonSuperPDPEvent::statusRequiresReason($code) ? ' data-reason-required="1"' : ''; ?>><?php echo dol_escape_htmltag($code . ' — ' . $lbl); ?></option>
         <?php endforeach; ?>
       </select>
+      <?php
+      // Motif du statut (MDT-113/MDT-114) — obligatoire pour fr:206/207/208/210
+      // (BR-FR-CDV-15), bloqué côté serveur si absent. Les codes normalisés
+      // configurés (LEMONSUPERPDP_REASON_CODES) alimentent la datalist.
+      // NB : lsp_allowed_outgoing() ne propose aujourd'hui que fr:212 (motif
+      // FACULTATIF, transmis en details[].reason et persisté) — la branche
+      // « motif obligatoire » (data-reason-required + contrôle serveur/JS) est
+      // du provisionnement pour un futur élargissement du menu aux statuts
+      // vendeur à motif obligatoire (fr:206/207/208/210/213/501).
+      $lspReasonCodes = LemonSuperPDPEvent::getReasonCodes();
+      ?>
+      <input type="text" name="lifecycle_reason_code" id="lsp_reason_code" list="lsp_reason_codes"
+             placeholder="<?php echo dol_escape_htmltag($langs->transnoentities('LemonSuperPDPReasonCodePlaceholder')); ?>"
+             style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid #d3d1c7;min-width:140px;">
+      <datalist id="lsp_reason_codes">
+        <?php foreach ($lspReasonCodes as $rc => $rcLabel): ?>
+        <option value="<?php echo dol_escape_htmltag($rc); ?>"><?php echo dol_escape_htmltag($rcLabel); ?></option>
+        <?php endforeach; ?>
+      </datalist>
+      <input type="text" name="lifecycle_reason" maxlength="255"
+             placeholder="<?php echo dol_escape_htmltag($langs->transnoentities('LemonSuperPDPReasonTextPlaceholder')); ?>"
+             style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid #d3d1c7;flex:1;min-width:160px;">
       <button type="submit" style="font-size:12px;padding:5px 12px;border-radius:6px;border:1px solid #c0dd97;background:#eaf3de;color:#27500a;cursor:pointer;">&#10003; Envoyer</button>
+      <script>
+      // Pré-contrôle client (le serveur bloque de toute façon) : motif exigé
+      // pour les statuts marqués data-reason-required (BR-FR-CDV-15).
+      (function () {
+        var sel = document.getElementById('lsp_status_select');
+        if (!sel || !sel.form) return;
+        sel.form.addEventListener('submit', function (e) {
+          var opt = sel.options[sel.selectedIndex];
+          var rc = document.getElementById('lsp_reason_code');
+          if (opt && opt.getAttribute('data-reason-required') === '1' && rc && rc.value.trim() === '') {
+            e.preventDefault();
+            alert(<?php echo json_encode($langs->transnoentities('LemonSuperPDPReasonRequiredJs')); ?>);
+            rc.focus();
+          }
+        });
+      })();
+      </script>
     </form>
   </div>
   <?php endif; ?>
@@ -429,8 +494,11 @@ function lsp_flux($code, $flux_db = '')
     if (!empty($flux_db) && in_array($flux_db, array('fournisseur', 'pdp', 'client'), true)) {
         return $flux_db;
     }
-    $fournisseur = array('fr:200','fr:201','fr:202','fr:203','fr:204','fr:205','api:uploaded','api:recovered','facturx:generated','facturx:error');
-    $pdp         = array('ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR');
+    // fr:200..fr:203 = statuts de transmission (plateformes) → ligne fournisseur ;
+    // fr:213/fr:501 = rejets posés par les plateformes → ligne PDP/PA ;
+    // le reste (fr:204..fr:211, traitement acheteur) → ligne client.
+    $fournisseur = array('fr:200','fr:201','fr:202','fr:203','api:uploaded','api:recovered','facturx:generated','facturx:error');
+    $pdp         = array('ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR','fr:213','fr:501');
     if (in_array($code, $fournisseur, true)) return 'fournisseur';
     if (in_array($code, $pdp, true))         return 'pdp';
     return 'client';
@@ -469,18 +537,20 @@ function lsp_color($code, $flux = '')
 {
     if ($flux === '' || $flux === null) $flux = lsp_flux($code);
     if ($code === 'ERROR' || $code === 'REJECT') return '#A32D2D';
+    if (in_array($code, array('fr:213', 'fr:501'), true)) return '#A32D2D'; // rejets plateforme
     if ($code === 'api:recovered') return '#CC9900'; // ambre — avertissement recovery
     if ($code === 'api:uploaded')  return '#3B6D11'; // vert — envoi API réussi
     if ($flux === 'fournisseur') return '#185FA5';
     if ($flux === 'pdp')         return '#888780';
-    if ($code === 'fr:210')      return '#A32D2D';
-    if ($code === 'fr:211')      return '#854F0B';
+    if ($code === 'fr:210')      return '#A32D2D'; // refusée
+    if ($code === 'fr:207')      return '#854F0B'; // en litige
+    if ($code === 'fr:208')      return '#CC9900'; // suspendue
     return '#3B6D11';
 }
 
 function lsp_dashed($code)
 {
-    return in_array($code, array('ACK','ACK-01','ACK-02','ROUTE','ERROR','REJECT','api:recovered','fr:210','fr:211'), true);
+    return in_array($code, array('ACK','ACK-01','ACK-02','ROUTE','ERROR','REJECT','api:recovered','fr:207','fr:208','fr:210','fr:213','fr:501'), true);
 }
 
 function lsp_seq_from($code, $flux = '')
@@ -522,7 +592,29 @@ function lsp_allowed_outgoing($fk, $db)
     if ($res && $db->num_rows($res) > 0) {
         return array();
     }
-    return array('fr:212' => 'Encaissée');
+    return array(LemonSuperPDPEvent::STATUS_ENCAISSEE => LemonSuperPDPEvent::getStatusLabel(LemonSuperPDPEvent::STATUS_ENCAISSEE));
+}
+
+/**
+ * Date (Y-m-d) du dernier paiement lié à la facture, ou date du jour.
+ * Utilisée pour dater les montants MEN de l'émission manuelle de fr:212,
+ * comme le fait le trigger BILL_PAYED.
+ */
+function lsp_last_payment_date($fk, $db)
+{
+    $paymentDate = date('Y-m-d');
+    $sql = 'SELECT MAX(p.datep) AS last_pay FROM ' . MAIN_DB_PREFIX . 'paiement p'
+         . ' INNER JOIN ' . MAIN_DB_PREFIX . 'paiement_facture pf ON pf.fk_paiement = p.rowid'
+         . ' WHERE pf.fk_facture = ' . ((int) $fk);
+    $res = $db->query($sql);
+    if ($res) {
+        $obj = $db->fetch_object($res);
+        if (!empty($obj) && !empty($obj->last_pay)) {
+            $paymentDate = date('Y-m-d', $db->jdate($obj->last_pay));
+        }
+        $db->free($res);
+    }
+    return $paymentDate;
 }
 
 function lsp_render_svg(array $events)

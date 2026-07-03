@@ -8,9 +8,9 @@
  * (at your option) any later version.
  *
  * Objet métier : un événement de cycle de vie d'une facture SUPER PDP
- * (status_code AFNOR fr:200..fr:212). Les events peuvent être sortants
- * (direction='out', émis par nous via POST /v1.beta/invoice_events) ou
- * entrants (direction='in', récupérés via le cron de polling sur
+ * (status_code AFNOR fr:200..fr:213 + fr:501). Les events peuvent être
+ * sortants (direction='out', émis par nous via POST /v1.beta/invoice_events)
+ * ou entrants (direction='in', récupérés via le cron de polling sur
  * GET /v1.beta/invoice_events).
  */
 
@@ -27,6 +27,8 @@ class LemonSuperPDPEvent extends CommonObject
 	public $entity;
 	public $superpdp_event_id;
 	public $status_code;
+	public $reason_code;         // code motif normalisé du statut (MDT-113, BR-FR-CDV-15)
+	public $reason;              // motif en texte libre (MDT-114) — conservé en local
 	public $message;
 	public $direction;           // 'in' ou 'out'
 	public $flux;                // 'fournisseur' | 'pdp' | 'client'
@@ -39,22 +41,54 @@ class LemonSuperPDPEvent extends CommonObject
 	const DIRECTION_IN  = 'in';
 	const DIRECTION_OUT = 'out';
 
-	// Codes AFNOR du cycle de vie facture électronique (spec DGFiP / PA).
-	// Utilisés partout dans le module, centralisés ici pour éviter les
-	// strings magiques et faciliter la migration future vers la spec v2.
+	// Codes du cycle de vie facture électronique, centralisés ici pour éviter
+	// les strings magiques.
+	//
+	// Référentiel établi sur pièces (2026-07) : l'API SUPER PDP (spec OpenAPI
+	// v1.24.0.beta, schéma status_code) transporte DIRECTEMENT les codes
+	// « ProcessConditionCode » de la réforme (MDT-105, XP Z12-012 chap. 5,
+	// règle BR-FR-CDV-CL-06) préfixés « fr: ». Il n'y a donc AUCUN transcodage
+	// à faire côté transport : fr:NNN sur le fil = code réforme NNN.
+	//
+	// Correspondance code ↔ statut (source : XP Z12-012 BR-FR-CDV-CL-05 +
+	// doc API SUPER PDP ; les deux concordent) :
+	//
+	//   Code    | Statut réforme            | Posé par              | Motif exigé (BR-FR-CDV-15)
+	//   --------+---------------------------+-----------------------+---------------------------
+	//   fr:200  | Déposée                   | PA émettrice          | non
+	//   fr:201  | Émise par la plateforme   | PA émettrice          | non
+	//   fr:202  | Reçue par la plateforme   | PA destinataire       | non
+	//   fr:203  | Mise à disposition        | PA destinataire       | non
+	//   fr:204  | Prise en charge           | Acheteur              | non
+	//   fr:205  | Approuvée                 | Acheteur              | non
+	//   fr:206  | Approuvée partiellement   | Acheteur              | OUI
+	//   fr:207  | En litige                 | Acheteur              | OUI
+	//   fr:208  | Suspendue                 | Acheteur              | OUI
+	//   fr:209  | Complétée                 | Vendeur               | non
+	//   fr:210  | Refusée                   | Acheteur              | OUI
+	//   fr:211  | Paiement transmis         | Acheteur              | non
+	//   fr:212  | Encaissée                 | Vendeur               | non (mais montants MEN exigés, BR-FR-CDV-14)
+	//   fr:213  | Rejetée                   | PA                    | OUI
+	//   fr:501  | Irrecevable               | PA                    | OUI
+	//
+	// ATTENTION : avant 2026-07 ces constantes portaient une sémantique
+	// décalée (fr:206 étiqueté « Approuvée », fr:209 « Paiement transmis »…).
+	// Les noms ci-dessous suivent désormais la sémantique officielle.
 	const STATUS_DEPOSEE              = 'fr:200';
-	const STATUS_REJET_EMETTRICE      = 'fr:201';
-	const STATUS_RECUE_DESTINATAIRE   = 'fr:202';
-	const STATUS_REJET_DESTINATAIRE   = 'fr:203';
-	const STATUS_MISE_A_DISPOSITION   = 'fr:204';
-	const STATUS_PRISE_EN_CHARGE      = 'fr:205';
-	const STATUS_APPROUVEE            = 'fr:206';
-	const STATUS_APPROUVEE_PARTIELLE  = 'fr:207';
-	const STATUS_PAIEMENT_EN_COURS    = 'fr:208';
-	const STATUS_PAIEMENT_TRANSMIS    = 'fr:209';
+	const STATUS_EMISE                = 'fr:201';
+	const STATUS_RECUE                = 'fr:202';
+	const STATUS_MISE_A_DISPOSITION   = 'fr:203';
+	const STATUS_PRISE_EN_CHARGE      = 'fr:204';
+	const STATUS_APPROUVEE            = 'fr:205';
+	const STATUS_APPROUVEE_PARTIELLE  = 'fr:206';
+	const STATUS_LITIGE               = 'fr:207';
+	const STATUS_SUSPENDUE            = 'fr:208';
+	const STATUS_COMPLETEE            = 'fr:209';
 	const STATUS_REFUSEE              = 'fr:210';
-	const STATUS_LITIGE               = 'fr:211';
+	const STATUS_PAIEMENT_TRANSMIS    = 'fr:211';
 	const STATUS_ENCAISSEE            = 'fr:212';
+	const STATUS_REJETEE              = 'fr:213';
+	const STATUS_IRRECEVABLE          = 'fr:501';
 
 	public function __construct($db)
 	{
@@ -70,6 +104,8 @@ class LemonSuperPDPEvent extends CommonObject
 		$this->entity = $obj->entity;
 		$this->superpdp_event_id = $obj->superpdp_event_id;
 		$this->status_code = $obj->status_code;
+		$this->reason_code = isset($obj->reason_code) ? $obj->reason_code : null;
+		$this->reason = isset($obj->reason) ? $obj->reason : null;
 		$this->message = $obj->message;
 		$this->direction = $obj->direction;
 		$this->flux = isset($obj->flux) ? $obj->flux : null;
@@ -86,13 +122,15 @@ class LemonSuperPDPEvent extends CommonObject
 		$now = dol_now();
 
 		$sql = "INSERT INTO ".MAIN_DB_PREFIX."lemonsuperpdp_event (";
-		$sql .= "fk_transmission, fk_facture, entity, superpdp_event_id, status_code, message, direction, flux, event_date, payload_raw, date_creation, fk_user_creat";
+		$sql .= "fk_transmission, fk_facture, entity, superpdp_event_id, status_code, reason_code, reason, message, direction, flux, event_date, payload_raw, date_creation, fk_user_creat";
 		$sql .= ") VALUES (";
 		$sql .= (!empty($this->fk_transmission) ? ((int) $this->fk_transmission) : "NULL");
 		$sql .= ", ".(!empty($this->fk_facture) ? ((int) $this->fk_facture) : "NULL");
 		$sql .= ", ".((int) $conf->entity);
 		$sql .= ", ".(!empty($this->superpdp_event_id) ? ((int) $this->superpdp_event_id) : "NULL");
 		$sql .= ", '".$this->db->escape($this->status_code)."'";
+		$sql .= ", ".(!empty($this->reason_code) ? "'".$this->db->escape($this->reason_code)."'" : "NULL");
+		$sql .= ", ".(!empty($this->reason) ? "'".$this->db->escape($this->reason)."'" : "NULL");
 		$sql .= ", ".(!empty($this->message) ? "'".$this->db->escape($this->message)."'" : "NULL");
 		$sql .= ", '".$this->db->escape(!empty($this->direction) ? $this->direction : self::DIRECTION_IN)."'";
 		$sql .= ", ".(!empty($this->flux) ? "'".$this->db->escape($this->flux)."'" : "NULL");
@@ -125,6 +163,9 @@ class LemonSuperPDPEvent extends CommonObject
 	 *   status_code (string, requis)
 	 *   direction (string, DIRECTION_IN|DIRECTION_OUT, requis)
 	 *   superpdp_event_id (int, optionnel)
+	 *   reason_code (string, optionnel — code motif MDT-113, exigé par la
+	 *                norme pour certains statuts, cf statusRequiresReason())
+	 *   reason (string, optionnel — motif en texte libre, MDT-114)
 	 *   message (string, optionnel)
 	 *   event_date (timestamp, optionnel, défaut dol_now())
 	 *   payload_raw (string, optionnel)
@@ -142,6 +183,8 @@ class LemonSuperPDPEvent extends CommonObject
 		$ev->fk_facture = isset($attrs['fk_facture']) ? (int) $attrs['fk_facture'] : null;
 		$ev->superpdp_event_id = isset($attrs['superpdp_event_id']) ? (int) $attrs['superpdp_event_id'] : null;
 		$ev->status_code = isset($attrs['status_code']) ? (string) $attrs['status_code'] : '';
+		$ev->reason_code = isset($attrs['reason_code']) ? $attrs['reason_code'] : null;
+		$ev->reason = isset($attrs['reason']) ? $attrs['reason'] : null;
 		$ev->message = isset($attrs['message']) ? $attrs['message'] : null;
 		$ev->direction = isset($attrs['direction']) ? $attrs['direction'] : self::DIRECTION_IN;
 		$ev->flux = isset($attrs['flux']) ? $attrs['flux'] : null;
@@ -186,7 +229,8 @@ class LemonSuperPDPEvent extends CommonObject
 	 * @param DoliDB   $db              Connexion base
 	 * @param array    $events          Tableau d'events tels que renvoyés par
 	 *                                  l'API (attendus : id, status_code,
-	 *                                  message, created_at)
+	 *                                  message, created_at ; optionnels :
+	 *                                  details[].reason, data.reason)
 	 * @param int      $fkTransmission  ID transmission locale
 	 * @param int|null $fkFacture       ID facture pour l'action agenda (null = pas d'action)
 	 * @param User     $user            Utilisateur qui enregistre
@@ -211,10 +255,20 @@ class LemonSuperPDPEvent extends CommonObject
 
 			if ($evProbe->existsBySuperpdpId((int) $ev['id'])) continue;
 
+			// Motif du statut (MDT-113) : l'API le porte dans details[].reason
+			// (event sortant échoé) ou dans data.reason (event entrant).
+			$reasonCode = null;
+			if (!empty($ev['details'][0]['reason'])) {
+				$reasonCode = (string) $ev['details'][0]['reason'];
+			} elseif (!empty($ev['data']['reason'])) {
+				$reasonCode = (string) $ev['data']['reason'];
+			}
+
 			$ret = self::createAndLog($db, array(
 				'fk_transmission'   => (int) $fkTransmission,
 				'superpdp_event_id' => (int) $ev['id'],
 				'status_code'       => (string) $ev['status_code'],
+				'reason_code'       => $reasonCode,
 				'message'           => !empty($ev['message']) ? (string) $ev['message'] : null,
 				'direction'         => self::DIRECTION_IN,
 				'event_date'        => $ts > 0 ? $ts : dol_now(),
@@ -322,6 +376,12 @@ class LemonSuperPDPEvent extends CommonObject
 		$dirSuffix = ($this->direction === self::DIRECTION_OUT) ? ' (émis)' : ' (reçu)';
 
 		$note = 'Événement SUPER PDP '.$this->status_code.' : '.$label.$dirSuffix;
+		if (!empty($this->reason_code) || !empty($this->reason)) {
+			$motifParts = array();
+			if (!empty($this->reason_code)) $motifParts[] = (string) $this->reason_code;
+			if (!empty($this->reason))      $motifParts[] = (string) $this->reason;
+			$note .= "\nMotif : ".implode(' — ', $motifParts);
+		}
 		if (!empty($this->superpdp_event_id)) {
 			$note .= "\nID SUPER PDP : ".((int) $this->superpdp_event_id);
 		}
@@ -351,25 +411,41 @@ class LemonSuperPDPEvent extends CommonObject
 	}
 
 	/**
-	 * Libellé humain d'un status_code AFNOR (fr:200..fr:212).
+	 * Libellé humain d'un status_code réforme (fr:200..fr:213, fr:501).
 	 * Utilisé en fallback quand l'API ne fournit pas de message.
+	 *
+	 * Libellés alignés sur la sémantique officielle XP Z12-012
+	 * (BR-FR-CDV-CL-05) — cf le tableau de correspondance au-dessus des
+	 * constantes STATUS_*. Passe par les fichiers de langue quand une clé
+	 * LemonSuperPDPFrStatusXXX existe (fallback : libellés français ci-dessous).
 	 */
 	public static function getStatusLabel($statusCode)
 	{
+		global $langs;
+		if (is_object($langs)) {
+			$key = 'LemonSuperPDPFrStatus'.preg_replace('/[^A-Za-z0-9]/', '', (string) $statusCode);
+			$langs->load('lemonsuperpdp@lemonsuperpdp');
+			$trans = $langs->transnoentities($key);
+			if ($trans !== $key) {
+				return $trans;
+			}
+		}
 		$map = array(
 			'fr:200' => 'Déposée',
-			'fr:201' => 'Rejetée par la plateforme émettrice',
-			'fr:202' => 'Reçue par la plateforme destinataire',
-			'fr:203' => 'Rejetée par la plateforme destinataire',
-			'fr:204' => 'Mise à disposition',
-			'fr:205' => 'Prise en charge',
-			'fr:206' => 'Approuvée',
-			'fr:207' => 'Approuvée partiellement',
-			'fr:208' => 'Paiement en cours',
-			'fr:209' => 'Paiement transmis',
+			'fr:201' => 'Émise par la plateforme',
+			'fr:202' => 'Reçue par la plateforme',
+			'fr:203' => 'Mise à disposition',
+			'fr:204' => 'Prise en charge',
+			'fr:205' => 'Approuvée',
+			'fr:206' => 'Approuvée partiellement',
+			'fr:207' => 'En litige',
+			'fr:208' => 'Suspendue',
+			'fr:209' => 'Complétée',
 			'fr:210' => 'Refusée',
-			'fr:211' => 'Litige',
+			'fr:211' => 'Paiement transmis',
 			'fr:212' => 'Encaissée',
+			'fr:213' => 'Rejetée',
+			'fr:501' => 'Irrecevable',
 			'ACK'    => 'Accusé de réception',
 			'ACK-01' => 'Accusé de réception',
 			'ACK-02' => 'Validation de format',
@@ -380,8 +456,55 @@ class LemonSuperPDPEvent extends CommonObject
 	}
 
 	/**
-	 * Codes status_code que l'émetteur peut POSTer (par opposition aux
-	 * events générés automatiquement par la plateforme : fr:200..fr:203).
+	 * Vrai si le statut exige un motif (MDT-113) selon la règle BR-FR-CDV-15 :
+	 * Approuvée partiellement (fr:206), En litige (fr:207), Suspendue (fr:208),
+	 * Refusée (fr:210), Rejetée (fr:213), Irrecevable (fr:501).
+	 *
+	 * @param string $statusCode  Code réforme (ex : 'fr:210')
+	 * @return bool
+	 */
+	public static function statusRequiresReason($statusCode)
+	{
+		return in_array($statusCode, array(
+			self::STATUS_APPROUVEE_PARTIELLE,
+			self::STATUS_LITIGE,
+			self::STATUS_SUSPENDUE,
+			self::STATUS_REFUSEE,
+			self::STATUS_REJETEE,
+			self::STATUS_IRRECEVABLE,
+		), true);
+	}
+
+	/**
+	 * Codes motifs normalisés (MDT-113) proposés à l'utilisateur.
+	 *
+	 * La liste officielle des motifs par statut est publiée dans l'annexe A
+	 * (fichier Excel) de la XP Z12-012, feuille « Tableau des motifs de
+	 * STATUTS » — elle n'est pas embarquée ici pour ne pas risquer de codes
+	 * inventés. Elle se configure par instance via la constante Dolibarr
+	 * LEMONSUPERPDP_REASON_CODES, au format JSON {"CODE": "Libellé", ...}.
+	 * Tant qu'elle n'est pas configurée, l'UI propose une saisie libre du
+	 * code (l'API SUPER PDP accepte une string dans details[].reason).
+	 *
+	 * @return array  Tableau code => libellé (vide si non configuré)
+	 */
+	public static function getReasonCodes()
+	{
+		$json = getDolGlobalString('LEMONSUPERPDP_REASON_CODES');
+		if (!empty($json)) {
+			$arr = json_decode($json, true);
+			if (is_array($arr)) {
+				return $arr;
+			}
+			dol_syslog('LemonSuperPDPEvent::getReasonCodes : LEMONSUPERPDP_REASON_CODES ne contient pas un JSON valide', LOG_WARNING);
+		}
+		return array();
+	}
+
+	/**
+	 * Codes status_code que l'on peut POSTer via l'API (enum status_code_create
+	 * de la spec SUPER PDP v1.24.0.beta), par opposition aux statuts posés par
+	 * les plateformes elles-mêmes (fr:200..fr:203, fr:213, fr:501).
 	 */
 	public static function getEmittableStatuses()
 	{
@@ -395,23 +518,25 @@ class LemonSuperPDPEvent extends CommonObject
 	{
 		switch ($statusCode) {
 			case 'fr:200':
-			case 'fr:204':
-			case 'fr:205':
-				return 'badge-status1';   // jaune — en cours
-			case 'fr:202':
-			case 'fr:206':
-				return 'badge-status4';   // vert — OK
-			case 'fr:207':
-			case 'fr:208':
-			case 'fr:209':
-				return 'badge-status5';   // bleu — en cours paiement
-			case 'fr:212':
-				return 'badge-status6';   // orange — terminé/payée
 			case 'fr:201':
+			case 'fr:202':
 			case 'fr:203':
-			case 'fr:210':
-				return 'badge-status8';   // rouge — rejet
+			case 'fr:204':
+			case 'fr:208':
+				return 'badge-status1';   // jaune — transmission/traitement en cours, suspendue
+			case 'fr:205':
+			case 'fr:206':
+			case 'fr:209':
+				return 'badge-status4';   // vert — approuvée (totale/partielle), complétée
 			case 'fr:211':
+				return 'badge-status5';   // bleu — paiement transmis
+			case 'fr:212':
+				return 'badge-status6';   // orange — encaissée
+			case 'fr:210':
+			case 'fr:213':
+			case 'fr:501':
+				return 'badge-status8';   // rouge — refusée / rejetée / irrecevable
+			case 'fr:207':
 				return 'badge-status9';   // rouge foncé — litige
 			default:
 				return 'badge-status0';   // gris
@@ -464,7 +589,7 @@ class LemonSuperPDPEvent extends CommonObject
 		$tStatus    = $lastObj ? (string) $lastObj->t_status : '';
 		$tStatusRaw = $lastObj ? (string) $lastObj->t_status_raw : '';
 
-		$badCodes = array('ERROR', 'REJECT', 'fr:201', 'fr:203', 'fr:210', 'fr:211');
+		$badCodes = array('ERROR', 'REJECT', 'fr:207', 'fr:210', 'fr:213', 'fr:501');
 		if (in_array($lastCode, $badCodes, true) || $tStatus === 'error') {
 			$color = self::_badgeColor($lastCode); // rouge ou orange selon le code
 		} elseif ($tStatusRaw === 'recovered') {
@@ -480,12 +605,12 @@ class LemonSuperPDPEvent extends CommonObject
 
 	private static function _badgeColor($code)
 	{
-		if (in_array($code, array('ERROR', 'fr:210', 'REJECT', 'fr:201', 'fr:203'), true)) return '#A32D2D';
-		if ($code === 'fr:211')        return '#854F0B';
-		if ($code === 'api:recovered') return '#CC9900'; // ambre — avertissement
-		if (in_array($code, array('fr:212', 'fr:206', 'fr:207'), true))              return '#3B6D11';
-		if (in_array($code, array('fr:204', 'fr:205', 'fr:208', 'fr:209',
-		                          'fr:200', 'fr:202', 'ACK', 'ACK-01',
+		if (in_array($code, array('ERROR', 'REJECT', 'fr:210', 'fr:213', 'fr:501'), true)) return '#A32D2D';
+		if ($code === 'fr:207')        return '#854F0B'; // brun — litige
+		if (in_array($code, array('api:recovered', 'fr:208'), true)) return '#CC9900'; // ambre — avertissement / suspendue
+		if (in_array($code, array('fr:212', 'fr:205', 'fr:206'), true))              return '#3B6D11';
+		if (in_array($code, array('fr:200', 'fr:201', 'fr:202', 'fr:203',
+		                          'fr:204', 'fr:209', 'fr:211', 'ACK', 'ACK-01',
 		                          'ACK-02', 'ROUTE'), true))                          return '#185FA5';
 		return '#888780';
 	}

@@ -169,19 +169,50 @@ if ($action == 'createsoc' && $id > 0 && $user->hasRight('lemonsuperpdp', 'recep
 	$action = '';
 }
 
-// Cycle de vie acheteur : approuver (fr:206) ou refuser (fr:210) une facture reçue
-if (($action == 'accept' || $action == 'refuse') && $id > 0 && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
+// Cycle de vie acheteur : approuver (fr:205) une facture reçue
+if ($action == 'accept' && $id > 0 && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
 	if (GETPOST('token', 'alpha') != newToken()) {
 		accessforbidden('Bad value for CSRF token');
 	}
 	dol_include_once('/lemonsuperpdp/class/event.class.php');
 	$rec = new LemonSuperPDPReception($db);
 	if ($rec->fetch($id) > 0 && $rec->status === LemonSuperPDPReception::STATUS_IMPORTED) {
-		$code = ($action == 'accept') ? LemonSuperPDPEvent::STATUS_APPROUVEE : LemonSuperPDPEvent::STATUS_REFUSEE;
+		$code = LemonSuperPDPEvent::STATUS_APPROUVEE;
 		if ($rec->sendLifecycleEvent($user, $code) > 0) {
 			setEventMessages($langs->trans('LemonSuperPDPRecLifecycleSent', $code), null, 'mesgs');
 		} else {
 			setEventMessages($rec->error, null, 'errors');
+		}
+	}
+	$action = '';
+}
+
+// Cycle de vie acheteur : refuser (fr:210) une facture reçue.
+// Le refus exige un motif (MDT-113, règle BR-FR-CDV-15) : il est demandé via
+// la boîte de confirmation (action=ask_refuse, rendue plus bas dans la vue)
+// et transmis à la PA dans details[].reason. Refus sans motif = bloqué.
+if ($action == 'refuse' && $id > 0 && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
+	if (GETPOST('token', 'alpha') != newToken()) {
+		accessforbidden('Bad value for CSRF token');
+	}
+	if (GETPOST('confirm', 'alpha') == 'yes') {
+		dol_include_once('/lemonsuperpdp/class/event.class.php');
+		$reasonCode = trim(GETPOST('reason_code', 'alphanohtml'));
+		$reasonText = trim(GETPOST('reason_text', 'alphanohtml'));
+		if ($reasonCode === '') {
+			setEventMessages($langs->trans('LemonSuperPDPReasonRequired', LemonSuperPDPEvent::STATUS_REFUSEE), null, 'errors');
+		} else {
+			$rec = new LemonSuperPDPReception($db);
+			if ($rec->fetch($id) > 0 && $rec->status === LemonSuperPDPReception::STATUS_IMPORTED) {
+				$details = array(array('reason' => $reasonCode));
+				if ($rec->sendLifecycleEvent($user, LemonSuperPDPEvent::STATUS_REFUSEE, null, $details, $reasonCode, $reasonText) > 0) {
+					$msg = $langs->trans('LemonSuperPDPRecLifecycleSent', LemonSuperPDPEvent::STATUS_REFUSEE);
+					$msg .= ' — '.$langs->trans('LemonSuperPDPReasonCode').' : '.$reasonCode.($reasonText !== '' ? ' ('.$reasonText.')' : '');
+					setEventMessages($msg, null, 'mesgs');
+				} else {
+					setEventMessages($rec->error, null, 'errors');
+				}
+			}
 		}
 	}
 	$action = '';
@@ -279,6 +310,47 @@ if (!getDolGlobalInt('LEMONSUPERPDP_IN_ENABLED')) {
 }
 
 print '</form>';
+
+// Boîte de confirmation du refus (fr:210) avec saisie du motif — rendue ici,
+// HORS des formulaires de filtres (jamais de <form> imbriqué). Le motif
+// (MDT-113) est obligatoire : la norme XP Z12-012 (BR-FR-CDV-15) l'exige
+// pour le statut Refusée. Les codes normalisés éventuellement configurés
+// (constante LEMONSUPERPDP_REASON_CODES) sont proposés en liste, sinon
+// saisie libre du code.
+if ($action == 'ask_refuse' && $id > 0 && $user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
+	$lspReasonCodes = LemonSuperPDPEvent::getReasonCodes();
+	$formquestion = array();
+	if (!empty($lspReasonCodes)) {
+		$formquestion[] = array(
+			'type'   => 'select',
+			'name'   => 'reason_code',
+			'label'  => $langs->trans('LemonSuperPDPReasonCode'),
+			'values' => $lspReasonCodes,
+		);
+	} else {
+		$formquestion[] = array(
+			'type'  => 'text',
+			'name'  => 'reason_code',
+			'label' => $langs->trans('LemonSuperPDPReasonCode'),
+			'value' => '',
+		);
+	}
+	$formquestion[] = array(
+		'type'  => 'text',
+		'name'  => 'reason_text',
+		'label' => $langs->trans('LemonSuperPDPReasonText'),
+		'value' => '',
+	);
+	print $form->formconfirm(
+		$_SERVER["PHP_SELF"].'?id='.((int) $id),
+		$langs->trans('LemonSuperPDPRecRefuseTitle'),
+		$langs->trans('LemonSuperPDPRecRefuseConfirm'),
+		'refuse',
+		$formquestion,
+		'',
+		1
+	);
+}
 
 // Import manuel : formulaire séparé (multipart), hors du formulaire de filtres.
 if ($user->hasRight('lemonsuperpdp', 'reception', 'ecrire')) {
@@ -450,11 +522,20 @@ while ($i < $imax) {
 	}
 	// Cycle de vie acheteur : approuver / refuser une facture importée venant de la PA
 	if ($canWrite && $obj->status === LemonSuperPDPReception::STATUS_IMPORTED && !empty($obj->superpdp_id)) {
-		if ($obj->lifecycle_status !== LemonSuperPDPEvent::STATUS_APPROUVEE) {
-			print '<a class="butActionSmall" href="'.$_SERVER["PHP_SELF"].'?action=accept&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="fr:206">'.$langs->trans('LemonSuperPDPRecAccept').'</a> ';
+		// fr:206 accepté aussi comme « déjà approuvée » : avant le correctif
+		// sémantique de 2026-07, l'approbation était émise à tort avec ce code
+		// (Approuvée partiellement) — les réceptions historiques le portent encore.
+		$lspAlreadyApproved = in_array($obj->lifecycle_status, array(
+			LemonSuperPDPEvent::STATUS_APPROUVEE,
+			LemonSuperPDPEvent::STATUS_APPROUVEE_PARTIELLE,
+		), true);
+		if (!$lspAlreadyApproved) {
+			print '<a class="butActionSmall" href="'.$_SERVER["PHP_SELF"].'?action=accept&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="'.dol_escape_htmltag(LemonSuperPDPEvent::STATUS_APPROUVEE).'">'.$langs->trans('LemonSuperPDPRecAccept').'</a> ';
 		}
 		if ($obj->lifecycle_status !== LemonSuperPDPEvent::STATUS_REFUSEE) {
-			print '<a class="butActionDeleteSmall" href="'.$_SERVER["PHP_SELF"].'?action=refuse&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="fr:210" onclick="return confirm(\''.dol_escape_js($langs->trans('LemonSuperPDPRecRefuseConfirm')).'\');">'.$langs->trans('LemonSuperPDPRecRefuse').'</a>';
+			// Le refus passe par action=ask_refuse : boîte de confirmation avec
+			// saisie du motif obligatoire (BR-FR-CDV-15), pas de refus direct.
+			print '<a class="butActionDeleteSmall" href="'.$_SERVER["PHP_SELF"].'?action=ask_refuse&id='.((int) $obj->rowid).'&token='.newToken().$param.'" title="'.dol_escape_htmltag(LemonSuperPDPEvent::STATUS_REFUSEE).'">'.$langs->trans('LemonSuperPDPRecRefuse').'</a>';
 		}
 	}
 	print '</td>';

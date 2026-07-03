@@ -63,8 +63,9 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 				return 1;
 			}
 
-			// Facture fournisseur payée : fr:209 Paiement transmis vers le
-			// fournisseur, si la facture vient d'une réception SUPER PDP.
+			// Facture fournisseur payée : fr:211 (Paiement transmis, posé par
+			// l'acheteur) vers le fournisseur, si la facture vient d'une
+			// réception SUPER PDP.
 			if ($action === 'BILL_SUPPLIER_PAYED' && $object->element === 'invoice_supplier') {
 				return $this->sendSupplierPaymentEvent($object, $user);
 			}
@@ -94,22 +95,26 @@ class InterfaceLemonsuperpdp extends DolibarrTriggers
 	}
 
 	/**
-	 * Émet fr:209 (Paiement transmis) vers SUPER PDP quand une facture
+	 * Émet fr:211 (Paiement transmis) vers SUPER PDP quand une facture
 	 * fournisseur issue d'une réception est soldée.
 	 */
 	private function sendSupplierPaymentEvent($factureFourn, $user)
 	{
 		dol_include_once('/lemonsuperpdp/class/reception.class.php');
+		dol_include_once('/lemonsuperpdp/class/event.class.php');
 
 		$rec = new LemonSuperPDPReception($this->db);
 		if ($rec->fetchByFactureFourn($factureFourn->id) <= 0) return 0;
 		if (empty($rec->superpdp_id)) return 0;
-		if ($rec->lifecycle_status === LemonSuperPDPEvent::STATUS_PAIEMENT_TRANSMIS) return 0;
+		// fr:209 = code émis à tort avant le correctif sémantique 2026-07
+		// (fr:209 « Complétée » est posé par le vendeur, pas par l'acheteur) :
+		// on le garde dans la garde anti-doublon pour ne pas ré-émettre un
+		// statut sur les réceptions historiques après réouverture/re-paiement.
+		if (in_array($rec->lifecycle_status, array(LemonSuperPDPEvent::STATUS_PAIEMENT_TRANSMIS, 'fr:209'), true)) return 0;
 
-		dol_include_once('/lemonsuperpdp/class/event.class.php');
 		$ret = $rec->sendLifecycleEvent($user, LemonSuperPDPEvent::STATUS_PAIEMENT_TRANSMIS);
 		if ($ret > 0) {
-			dol_syslog('LemonSuperPDP trigger: fr:209 envoyé pour facture fournisseur '.$factureFourn->ref.' (réception '.$rec->id.')', LOG_INFO);
+			dol_syslog('LemonSuperPDP trigger: '.LemonSuperPDPEvent::STATUS_PAIEMENT_TRANSMIS.' envoyé pour facture fournisseur '.$factureFourn->ref.' (réception '.$rec->id.')', LOG_INFO);
 		}
 		return ($ret > 0) ? 1 : 0;
 	}

@@ -27,7 +27,7 @@ class modLemonSuperPDP extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = "Émission et réception des factures électroniques via la Plateforme Agréée SUPER PDP";
 		$this->descriptionlong = "Envoie les factures clients Factur-X (générées par LemonFacturX) via l'API de la Plateforme Agréée SUPER PDP, synchronise les statuts de cycle de vie (déposée, acceptée, refusée, encaissée), et importe les factures fournisseurs reçues sur la plateforme en factures fournisseurs Dolibarr brouillon.";
-		$this->version = '1.2.3';
+		$this->version = '1.3.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'bill';
 		$this->editor_name = 'Lemon';
@@ -260,10 +260,16 @@ class modLemonSuperPDP extends DolibarrModules
 	{
 		$table = MAIN_DB_PREFIX . 'lemonsuperpdp_event';
 
-		// Colonnes à ajouter (direction existe déjà depuis la création initiale)
+		// Colonnes à ajouter (direction existe déjà depuis la création initiale).
+		// Les installs existantes ne rejouent pas les CREATE TABLE : chaque
+		// nouvelle colonne DOIT être listée ici (vérif information_schema).
 		$columns = array(
-			'flux' => "VARCHAR(20) DEFAULT NULL COMMENT 'fournisseur | pdp | client'",
-			'seen' => "TINYINT(1) NOT NULL DEFAULT 0 COMMENT '0 = non vu, 1 = vu'",
+			'fk_facture'  => "INTEGER DEFAULT NULL COMMENT 'facture liée sans transmission (facturx:generated)'",
+			'flux'        => "VARCHAR(20) DEFAULT NULL COMMENT 'fournisseur | pdp | client'",
+			'seen'        => "TINYINT(1) NOT NULL DEFAULT 0 COMMENT '0 = non vu, 1 = vu'",
+			// Motif du statut (XP Z12-012, BR-FR-CDV-15) : code MDT-113 + texte MDT-114
+			'reason_code' => "VARCHAR(64) DEFAULT NULL COMMENT 'code motif normalisé du statut (MDT-113)'",
+			'reason'      => "VARCHAR(255) DEFAULT NULL COMMENT 'motif du statut en texte libre (MDT-114)'",
 		);
 		foreach ($columns as $col => $def) {
 			$check = "SELECT 1 FROM information_schema.COLUMNS"
@@ -296,11 +302,15 @@ class modLemonSuperPDP extends DolibarrModules
 			$this->db->query("ALTER TABLE `" . $table . "` ADD INDEX `" . $idx_name . "` " . $idx_cols);
 		}
 
-		// Rétro-alimentation flux sur events existants (basée sur status_code + direction)
+		// Rétro-alimentation flux sur events existants (basée sur status_code + direction).
+		// Répartition alignée sur la sémantique officielle XP Z12-012 :
+		// fr:200..fr:203 = statuts de transmission (plateformes) → fournisseur ;
+		// fr:204..fr:211 = statuts de traitement (acheteur) → client ;
+		// fr:213/fr:501 = rejets posés par les plateformes → pdp.
 		// fr:212 émis par nous (direction='out') → fournisseur ; reçu (direction='in') → client
-		$fournisseur = "'fr:200','fr:201','fr:202','fr:203','fr:204','fr:205','api:uploaded','facturx:generated','facturx:error'";
-		$pdp         = "'ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR'";
-		$client      = "'fr:206','fr:207','fr:208','fr:209','fr:210','fr:211'";
+		$fournisseur = "'fr:200','fr:201','fr:202','fr:203','api:uploaded','facturx:generated','facturx:error'";
+		$pdp         = "'ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR','fr:213','fr:501'";
+		$client      = "'fr:204','fr:205','fr:206','fr:207','fr:208','fr:209','fr:210','fr:211'";
 		$backfills = array(
 			"UPDATE `" . $table . "` SET flux = 'fournisseur' WHERE status_code IN (" . $fournisseur . ") AND (flux IS NULL OR flux = '')",
 			"UPDATE `" . $table . "` SET flux = 'pdp'         WHERE status_code IN (" . $pdp         . ") AND (flux IS NULL OR flux = '')",

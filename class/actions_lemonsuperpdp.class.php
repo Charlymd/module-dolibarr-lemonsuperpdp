@@ -466,15 +466,29 @@ class ActionsLemonSuperPDP
 				try {
 					$dirClient = new SuperPDPClient($this->db);
 					$entries = $dirClient->listDirectoryEntries($buyerSiren);
+					$rawEntries = (array) (isset($entries['data']) ? $entries['data'] : array());
+					// API SUPER PDP (spec v1.24.0.beta), schéma french_directory_entry :
+					// le champ d'état d'une entrée est le booléen requis "is_active"
+					// (« When is_active is true … an invoice can be sent to this
+					// address »). Ne PAS confondre avec le "directoryLineStatus"
+					// (Enabled/Disabled/Upcoming) de la norme annuaire XP Z12-013 :
+					// SUPER PDP l'abstrait et n'expose que is_active.
 					$active = false;
-					foreach ((array) (isset($entries['data']) ? $entries['data'] : array()) as $entry) {
-						if (!isset($entry['is_active']) || !empty($entry['is_active'])) {
+					foreach ($rawEntries as $entry) {
+						if (!empty($entry['is_active'])) {
 							$active = true;
 							break;
 						}
 					}
 					if (!$active) {
-						return array('outcome' => 'skipped-notroutable', 'message' => $langs->trans('LemonSuperPDPNotRoutable', $buyerSiren));
+						if (empty($rawEntries)) {
+							// Absent de l'annuaire : aucune ligne d'adressage connue pour ce SIREN.
+							return array('outcome' => 'skipped-notroutable', 'message' => $langs->trans('LemonSuperPDPNotRoutable', $buyerSiren));
+						}
+						// Présent dans l'annuaire mais aucune entrée active (toutes en
+						// is_active=false) : motif NON_TRANSMISE de la norme (statut "Déposée" —
+						// destinataire connu mais sans Plateforme Agréée de réception choisie).
+						return array('outcome' => 'skipped-notroutable', 'message' => $langs->trans('LemonSuperPDPNotRoutableNonTransmise', $buyerSiren));
 					}
 				} catch (Exception $e) {
 					dol_syslog('LemonSuperPDP: pre-check annuaire indisponible ('.$e->getMessage().'), envoi tenté quand même', LOG_WARNING);
@@ -527,12 +541,14 @@ class ActionsLemonSuperPDP
 			}
 		}
 
-		// Injection BT-49 (adresse électronique acheteur) depuis idprof5 du tiers
-		// pour forcer le routage Peppol direct sans pré-check annuaire côté SUPER PDP.
+		// Injection BT-49 (adresse électronique acheteur) : idprof5 du tiers si
+		// renseigné, sinon repli SIREN+0225 (BR-FR-11/BR-FR-12) pour forcer le
+		// routage Peppol direct sans dépendre du pré-check annuaire SUPER PDP.
 		$tmpBt49Path = $this->injectBuyerPeppolAddress($fileToSend, $facture);
 		if ($tmpBt49Path !== null) {
+			$bt49Source = !empty($facture->thirdparty->idprof5) ? 'idprof5 ('.$facture->thirdparty->idprof5.')' : 'repli SIREN';
 			$fileToSend = $tmpBt49Path;
-			dol_syslog('LemonSuperPDP: BT-49 injecté depuis idprof5 ('.$facture->thirdparty->idprof5.') pour '.$facture->ref, LOG_INFO);
+			dol_syslog('LemonSuperPDP: BT-49 injecté depuis '.$bt49Source.' pour '.$facture->ref, LOG_INFO);
 		}
 
 		dol_include_once('/lemonsuperpdp/class/superpdp_client.class.php');
@@ -680,8 +696,12 @@ class ActionsLemonSuperPDP
 
 	/**
 	 * Injecte l'adresse électronique Peppol de l'acheteur (BT-49) dans le PDF Factur-X.
-	 * Source : champ RNA (idprof5) du tiers, format "SCHEME:ID" (ex: "0225:315143296_2887")
-	 * ou juste "ID" (schème 0225 par défaut).
+	 * Source prioritaire : champ RNA (idprof5) du tiers, format "SCHEME:ID"
+	 * (ex: "0225:315143296_2887") ou juste "ID" (schème 0225 par défaut).
+	 * À défaut (BR-FR-11/BR-FR-12) : repli sur le SIREN du tiers en schemeID
+	 * 0225 (forme normative par défaut de BT-49 pour les factures B2B hors
+	 * auto-facturation) — appelé uniquement une fois le hors-périmètre
+	 * e-invoicing déjà écarté par sendOneInvoice() (skipped-b2c).
 	 * Retourne le chemin d'un PDF temporaire patché, ou null si rien à faire.
 	 *
 	 * @param string  $pdfPath  Chemin du PDF source
@@ -694,13 +714,31 @@ class ActionsLemonSuperPDP
 			$facture->fetch_thirdparty();
 		}
 		$peppolRaw = !empty($facture->thirdparty->idprof5) ? trim($facture->thirdparty->idprof5) : '';
-		if ($peppolRaw === '') return null;
 
-		if (strpos($peppolRaw, ':') !== false) {
-			list($scheme, $peppolId) = explode(':', $peppolRaw, 2);
+		if ($peppolRaw !== '') {
+			if (strpos($peppolRaw, ':') !== false) {
+				list($scheme, $peppolId) = explode(':', $peppolRaw, 2);
+			} else {
+				$scheme   = '0225';
+				$peppolId = $peppolRaw;
+			}
 		} else {
+			// Repli BR-FR-11/BR-FR-12/BR-FR-21 : pas d'adresse Peppol dédiée sur le
+			// tiers (idprof5) → l'adresse électronique acheteur par défaut est son
+			// SIREN, schemeID 0225. Ce schème (annuaire français) ne vaut que pour
+			// des SIREN français : pas de repli pour un acheteur étranger, son
+			// identifiant national à 9/14 chiffres n'est PAS un SIREN.
+			$cc = !empty($facture->thirdparty->country_code) ? $facture->thirdparty->country_code : '';
+			if ($cc !== '' && $cc !== 'FR') return null;
+			$rawId = !empty($facture->thirdparty->idprof2) ? $facture->thirdparty->idprof2 : ($facture->thirdparty->idprof1 ?? '');
+			$digits = preg_replace('/[^0-9]/', '', (string) $rawId);
+			$buyerSiren = '';
+			if (strlen($digits) === 9 || strlen($digits) === 14) {
+				$buyerSiren = substr($digits, 0, 9);
+			}
+			if ($buyerSiren === '') return null;
 			$scheme   = '0225';
-			$peppolId = $peppolRaw;
+			$peppolId = $buyerSiren;
 		}
 
 		$facturxVendor = DOL_DOCUMENT_ROOT.'/custom/lemonfacturx/vendor/autoload.php';

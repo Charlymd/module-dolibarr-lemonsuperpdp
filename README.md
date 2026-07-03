@@ -8,11 +8,11 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Statut
 
-Version 1.2.3 — phase pilote SUPER PDP. Fonctionnalités :
+Version 1.3.0 — phase pilote SUPER PDP, cycle de vie aligné sur la norme XP Z12-012 (édition juin 2026). Fonctionnalités :
 
 - **Réception des factures fournisseurs** : polling de l'API (`direction=in`), rattachement automatique du tiers par SIREN/SIRET, création de la facture fournisseur Dolibarr **en brouillon** (jamais auto-validée) avec lignes, remises/frais de pied de document et fichier original (PDF Factur-X ou XML) attaché ; écran « Factur-X reçues » avec quarantaine pour les tiers introuvables ou ambigus et les devises étrangères
 - **Import manuel** d'un fichier Factur-X (PDF) ou XML (CII/UBL) reçu hors plateforme (par mail pendant la transition) : conversion par l'API SUPER PDP, même pipeline que le polling
-- **Cycle de vie côté acheteur** : Approuver (fr:206) / Refuser (fr:210) depuis l'écran des factures reçues, et fr:209 (Paiement transmis) envoyé automatiquement au paiement de la facture fournisseur
+- **Cycle de vie côté acheteur** : Approuver (fr:205) / Refuser (fr:210, avec motif obligatoire — BR-FR-CDV-15) depuis l'écran des factures reçues, et fr:211 (Paiement transmis) envoyé automatiquement au paiement de la facture fournisseur
 - **Pre-check annuaire** : avant chaque envoi, vérification que le destinataire a une adresse électronique active dans l'annuaire des Plateformes Agréées, avec un message clair sinon (au lieu du rejet cryptique de la plateforme)
 - **E-reporting B2C** : à la validation et au paiement des factures clients non assujettis à la TVA (particuliers, associations non assujetties...), mise en file des données de transactions (codes Z12-012 TLB1/TPS1/TNT1, ventilation par taux de TVA) et de paiements, transmises par lots à SUPER PDP qui agrège et déclare au PPF ; écran de suivi de la file avec relance des refusées
 
@@ -124,15 +124,15 @@ Les ignorées sont les brouillons, les déjà transmises, et les factures B2C.
 
 ### Suivre une transmission
 
-Sur la fiche facture, le bloc latéral **Transmission SUPER PDP** affiche le statut courant et la date d'envoi. L'onglet **Historique des événements** liste tous les `invoice_events` reçus (statuts AFNOR `fr:200` à `fr:212`, sens entrant/sortant).
+Sur la fiche facture, le bloc latéral **Transmission SUPER PDP** affiche le statut courant et la date d'envoi. L'onglet **Historique des événements** liste tous les `invoice_events` reçus (statuts réforme `fr:200` à `fr:213` plus `fr:501` Irrecevable, sens entrant/sortant).
 
 Le bouton **Rafraîchir** force une synchronisation à la demande pour cette facture (utile sans attendre le cron).
 
 ### Envoyer manuellement un statut
 
-Le menu déroulant **Envoyer un statut** propose les codes AFNOR `fr:204` à `fr:212` (réception, refus, mise à disposition, encaissée, etc.). Pour `fr:207` et `fr:212`, le module ventile automatiquement les montants TVA depuis les lignes de la facture.
+L'onglet **Cycle de vie** de la facture propose une émission manuelle de secours du statut `fr:212` Encaissée (normalement envoyé par le trigger `BILL_PAYED` quand vous validez un paiement dans Dolibarr). L'émission manuelle passe les mêmes détails que le trigger : montants encaissés **TTC** ventilés par taux de TVA (blocs `MEN`, exigés par la règle BR-FR-CDV-14), datés du dernier paiement enregistré.
 
-Le statut `fr:212` (encaissée) est également envoyé automatiquement par le trigger `BILL_PAYED` quand vous validez un paiement dans Dolibarr.
+Si un statut soumis à motif obligatoire est proposé dans ce menu (`fr:206`, `fr:207`, `fr:208`, `fr:210` — règle BR-FR-CDV-15), le formulaire exige la saisie d'un code motif avant l'envoi.
 
 ### Recevoir les factures fournisseurs
 
@@ -146,9 +146,11 @@ Le statut `fr:212` (encaissée) est également envoyé automatiquement par le tr
 
 > **Mise à jour depuis une version < 1.0.0** : désactiver puis réactiver le module pour créer les tables `llx_lemonsuperpdp_reception` et `llx_lemonsuperpdp_ereporting`, les nouvelles permissions, les entrées de menu et les tâches planifiées. La désactivation ne supprime aucune donnée.
 
+> **Mise à jour vers une version avec cycle de vie (colonnes `reason_code`/`reason`)** : la réactivation du module doit suivre **immédiatement** la copie des fichiers. Entre la copie et la réactivation, `LemonSuperPDPEvent::create()` référence des colonnes qui n'existent pas encore : les envois API partent, mais la trace locale des événements échoue (le polling rattrape les événements portant un identifiant plateforme, les autres sont perdus). Alternative : jouer `sql/llx_lemonsuperpdp_migration_lifecycle_columns.sql` **avant** la copie des fichiers.
+
 ### Approuver, refuser, déclarer payée une facture reçue
 
-Sur l'écran **Factur-X reçues**, chaque facture importée depuis la plateforme propose **Approuver** (fr:206) et **Refuser** (fr:210) — le fournisseur voit le statut remonter chez lui. Au paiement de la facture fournisseur dans Dolibarr, le module envoie automatiquement **fr:209 Paiement transmis**. Les statuts émis sont tracés dans l'agenda de la facture fournisseur.
+Sur l'écran **Factur-X reçues**, chaque facture importée depuis la plateforme propose **Approuver** (fr:205 Approuvée) et **Refuser** (fr:210 Refusée) — le fournisseur voit le statut remonter chez lui. Le refus ouvre une boîte de confirmation qui **exige un motif** (code MDT-113, règle BR-FR-CDV-15) : sans motif, l'envoi est bloqué. Au paiement de la facture fournisseur dans Dolibarr, le module envoie automatiquement **fr:211 Paiement transmis**. Les statuts émis sont tracés dans l'agenda de la facture fournisseur.
 
 Les imports manuels (fichier reçu par mail) n'ont pas d'identifiant plateforme : aucun statut n'est transmissible pour eux, c'est normal.
 
@@ -160,6 +162,53 @@ Les imports manuels (fichier reçu par mail) n'ont pas d'identifiant plateforme 
 4. L'écran **Facturation > Factures clients > E-reporting B2C (SUPER PDP)** affiche la file : en attente, transmises, refusées (relançables après correction)
 
 Les déclarations refusées par l'API (erreur 4xx) passent en « Refusée » et n'empêchent pas le reste de la file ; les erreurs réseau restent « En attente » et sont retentées à la passe suivante.
+
+## Conformité cycle de vie (XP Z12-012)
+
+L'API SUPER PDP transporte directement les codes statuts de la réforme (« ProcessConditionCode », MDT-105) préfixés `fr:` — il n'y a donc aucun transcodage entre l'API et la norme, seulement des libellés à afficher. La correspondance de référence vit dans `class/event.class.php` (constantes `STATUS_*`).
+
+### Statuts couverts
+
+| Code | Statut | Posé par | Le module... |
+|---|---|---|---|
+| `fr:200` | Déposée | PA émettrice | reçu au polling |
+| `fr:201` | Émise par la plateforme | PA émettrice | reçu au polling |
+| `fr:202` | Reçue par la plateforme | PA destinataire | reçu au polling |
+| `fr:203` | Mise à disposition | PA destinataire | reçu au polling |
+| `fr:204` | Prise en charge | Acheteur | reçu au polling |
+| `fr:205` | Approuvée | Acheteur | émis (bouton Approuver, factures reçues) / reçu |
+| `fr:206` | Approuvée partiellement | Acheteur | reçu (motif exigé à l'émission) |
+| `fr:207` | En litige | Acheteur | reçu (motif exigé à l'émission) |
+| `fr:208` | Suspendue | Acheteur | reçu (motif exigé à l'émission) |
+| `fr:209` | Complétée | Vendeur | reçu |
+| `fr:210` | Refusée | Acheteur | émis (bouton Refuser, motif obligatoire) / reçu |
+| `fr:211` | Paiement transmis | Acheteur | émis (trigger `BILL_SUPPLIER_PAYED`) / reçu |
+| `fr:212` | Encaissée | Vendeur | émis (trigger `BILL_PAYED` + secours manuel, montants MEN TTC) / reçu |
+| `fr:213` | Rejetée | PA | reçu au polling |
+| `fr:501` | Irrecevable | PA | reçu au polling |
+
+### Motifs de statut (BR-FR-CDV-15)
+
+La norme impose un motif (code MDT-113) pour les statuts Approuvée partiellement, En litige, Suspendue, Refusée, Rejetée et Irrecevable. Le module :
+
+- bloque toute émission de ces statuts sans code motif (UI liste des réceptions et onglet Cycle de vie) ;
+- transmet le code à la PA dans `details[].reason` (schéma `invoice_event_detail` de l'API) ;
+- stocke le code (`reason_code`) et un commentaire libre (`reason`, équivalent local du MDT-114 — non transmis, l'API n'exposant pas de champ texte) sur chaque événement émis depuis l'onglet Cycle de vie, et les trace dans l'agenda de la facture ; côté réception (refus fr:210), code et commentaire sont tracés dans la note agenda de la facture fournisseur (le suivi des factures reçues est porté par `llx_lemonsuperpdp_reception`, sans ligne événement locale).
+
+La liste officielle des codes motifs par statut est publiée dans l'annexe A (Excel) de la norme, feuille « Tableau des motifs de STATUTS » ; elle n'est pas embarquée dans le module. Elle se configure par instance via `LEMONSUPERPDP_REASON_CODES` (JSON `{"CODE": "Libellé"}`) et alimente alors les listes de choix ; à défaut, le code se saisit librement.
+
+### Montants (BR-FR-CDV-14)
+
+Le statut Encaissée (fr:212) part toujours avec des blocs de montants de type `MEN` : montant encaissé **TTC** ventilé par taux de TVA, dans la devise réelle de la facture (`multicurrency_code`, fallback devise société), daté du dernier paiement. `buildAmountsByVatRate()` accepte aussi les autres codes types de la règle BR-FR-CDV-CL-11 (`MPA`, `MAP`/`MAPTTC`, `MNA`/`MNATTC`...) pour les usages futurs (approbation partielle chiffrée).
+
+### Ce qui est délégué à la Plateforme Agréée
+
+Le module ne construit ni les messages CDAR (chap. 5 de la norme), ni les flux réglementaires : il pousse des appels REST à SUPER PDP, qui se charge de :
+
+- **Flux 1** (e-invoicing vers le PPF) : construit et transmis par la PA à partir de la facture déposée et des statuts obligatoires (Déposée, Rejetée, Refusée, Encaissée) ;
+- **Flux 10.1** (e-reporting) : la PA agrège nos déclarations `b2c_transactions` / `b2c_payments` et constitue le flux 10 attendu par le concentrateur du PPF ;
+- **Flux F11** (annuaire) : les données d'adressage viennent de la PA ; le module se contente d'interroger `/french_directory/entries` en pre-check avant envoi ;
+- **Messages CDAR de cycle de vie** : le module fournit code statut, motif et montants via `invoice_events`, la PA fabrique et achemine le message normalisé.
 
 ## Diagnostic et dépannage
 
@@ -247,6 +296,7 @@ Le module consomme l'API documentée ici : https://www.superpdp.tech/documentati
 | `LEMONSUPERPDP_OAUTH_SIREN` | string | (vide) | SIREN de l'application OAuth, mémorisé au dernier "Tester la connexion" réussi pour la cohérence du diagnostic |
 | `LEMONSUPERPDP_OAUTH_SIREN_AT` | string | `0` | Timestamp du dernier rafraîchissement de `LEMONSUPERPDP_OAUTH_SIREN` |
 | `LEMONSUPERPDP_SANDBOX_MODE` | int | 0 | Mode sandbox phase pilote : remplace le SIREN émetteur par `idprof6` avant envoi (à désactiver en prod) |
+| `LEMONSUPERPDP_REASON_CODES` | string | (vide) | Codes motifs normalisés (MDT-113) proposés à la saisie, JSON `{"CODE": "Libellé", ...}` — cf feuille « Tableau des motifs de STATUTS » de l'annexe A de la XP Z12-012 |
 
 ## Licence
 

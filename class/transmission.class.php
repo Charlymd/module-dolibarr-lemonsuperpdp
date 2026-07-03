@@ -44,43 +44,69 @@ class LemonSuperPDPTransmission extends CommonObject
 	}
 
 	/**
-	 * Table de correspondance status_code AFNOR (fr:200..fr:212) vers
-	 * status local de la transmission. Utilisée par le cron de polling
+	 * Table de correspondance status_code réforme (fr:200..fr:213, fr:501)
+	 * vers status local de la transmission. Utilisée par le cron de polling
 	 * et par le rafraîchissement manuel depuis la fiche facture pour
 	 * garder une source unique de vérité.
 	 *
-	 * @param string $statusCode  Code AFNOR (ex : 'fr:212')
+	 * Sémantique alignée sur la XP Z12-012 (cf tableau dans event.class.php) :
+	 * fr:200..fr:204 = la facture avance dans la transmission/prise en charge,
+	 * fr:205/fr:206 = approbation par l'acheteur, fr:210/fr:213/fr:501 =
+	 * refus ou rejet, fr:212 = encaissée. Les statuts fr:207 (litige),
+	 * fr:208 (suspendue), fr:209 (complétée) et fr:211 (paiement transmis)
+	 * ne changent pas le statut local (null) : l'event reste visible dans
+	 * l'onglet Cycle de vie.
+	 *
+	 * @param string $statusCode  Code réforme (ex : 'fr:212')
 	 * @return string|null        Statut local correspondant ou null si non mappé
 	 */
 	public static function mapStatusFromEventCode($statusCode)
 	{
 		$map = array(
 			'fr:200' => self::STATUS_SENT,
-			'fr:202' => self::STATUS_ACCEPTED,
-			'fr:204' => self::STATUS_ACCEPTED,
+			'fr:201' => self::STATUS_SENT,
+			'fr:202' => self::STATUS_SENT,
+			'fr:203' => self::STATUS_SENT,
+			'fr:204' => self::STATUS_SENT,
+			'fr:205' => self::STATUS_ACCEPTED,
 			'fr:206' => self::STATUS_ACCEPTED,
 			'fr:212' => self::STATUS_PAID,
-			'fr:201' => self::STATUS_REFUSED,
-			'fr:203' => self::STATUS_REFUSED,
 			'fr:210' => self::STATUS_REFUSED,
+			'fr:213' => self::STATUS_REFUSED,
+			'fr:501' => self::STATUS_REFUSED,
 		);
 		return isset($map[$statusCode]) ? $map[$statusCode] : null;
 	}
 
 	/**
 	 * Ventile les lignes d'une facture par taux de TVA et produit le tableau
-	 * "amounts" attendu par l'API SUPER PDP pour les events de paiement
-	 * (fr:207, fr:212...).
+	 * "amounts" attendu par l'API SUPER PDP (schéma invoice_event_amount)
+	 * pour les events porteurs de montants, en premier lieu fr:212 Encaissée.
+	 *
+	 * Conformité XP Z12-012 :
+	 *  - BR-FR-CDV-14 : le statut Encaissée (fr:212) exige au moins un bloc
+	 *    de type MEN avec un montant et le taux de TVA correspondant ;
+	 *  - BR-FR-CDV-CL-11 : MEN = montant encaissé exprimé en TTC — d'où la
+	 *    somme total_ht + total_tva par taux (et non le seul HT) ;
+	 *  - la devise reprend le multicurrency_code réel de la facture
+	 *    (fallback : devise de la société), plus de 'EUR' codé en dur.
 	 *
 	 * @param Facture $facture     Facture Dolibarr (fetch_lines() fait si besoin)
 	 * @param string  $paymentDate Date au format Y-m-d
+	 * @param string  $typeCode    Code type du montant (MDT-207, BR-FR-CDV-CL-11) :
+	 *                             'MEN' (encaissé TTC, défaut), 'MPA' (payé),
+	 *                             'MAPTTC'/'MAP' (approuvé TTC/HT, approbation
+	 *                             partielle), 'MNATTC'/'MNA' (non approuvé)...
 	 * @return array               Liste conforme au schéma SUPER PDP
 	 */
-	public static function buildAmountsByVatRate($facture, $paymentDate)
+	public static function buildAmountsByVatRate($facture, $paymentDate, $typeCode = 'MEN')
 	{
+		global $conf;
 		if (empty($facture->lines)) {
 			$facture->fetch_lines();
 		}
+		$currency = !empty($facture->multicurrency_code) ? $facture->multicurrency_code : $conf->currency;
+		$useMulticurrency = (!empty($facture->multicurrency_code) && !empty($conf->currency) && $facture->multicurrency_code !== $conf->currency);
 		$amountsByRate = array();
 		foreach ($facture->lines as $line) {
 			$rate = (float) $line->tva_tx;
@@ -88,14 +114,20 @@ class LemonSuperPDPTransmission extends CommonObject
 			if (!isset($amountsByRate[$key])) {
 				$amountsByRate[$key] = 0.0;
 			}
-			$amountsByRate[$key] += (float) $line->total_ht;
+			// Montant TTC (BR-FR-CDV-CL-11 : MEN = montant encaissé TTC),
+			// dans la devise de la facture si elle diffère de celle de la société.
+			if ($useMulticurrency && isset($line->multicurrency_total_ttc)) {
+				$amountsByRate[$key] += (float) $line->multicurrency_total_ttc;
+			} else {
+				$amountsByRate[$key] += (float) $line->total_ttc;
+			}
 		}
 		$amounts = array();
 		foreach ($amountsByRate as $rate => $netAmount) {
 			$amounts[] = array(
 				'net_amount' => number_format($netAmount, 2, '.', ''),
-				'currency_code' => 'EUR',
-				'type_code' => 'MEN',
+				'currency_code' => $currency,
+				'type_code' => $typeCode,
 				'vat_rate' => $rate,
 				'date' => $paymentDate,
 			);

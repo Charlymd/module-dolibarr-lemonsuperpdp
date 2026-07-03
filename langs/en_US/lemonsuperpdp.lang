@@ -149,7 +149,8 @@ LemonSuperPDPRecAccept = Approve
 LemonSuperPDPRecRefuse = Refuse
 LemonSuperPDPRecRefuseConfirm = Send the Refused status (fr:210) to the supplier through the platform?
 LemonSuperPDPRecLifecycleSent = Status %s sent to the platform
-LemonSuperPDPNotRoutable = The recipient (SIREN %s) has no active electronic address in the Approved Platforms directory: it cannot receive electronic invoices. Check the third party's SIRET or wait until it is connected to a platform.
+LemonSuperPDPNotRoutable = The recipient (SIREN %s) is absent from the Approved Platforms directory: it cannot receive electronic invoices. Check the third party's SIRET or wait until it is connected to a platform.
+LemonSuperPDPNotRoutableNonTransmise = The recipient (SIREN %s) is present in the Approved Platforms directory but has not selected any active routing line (NON_TRANSMISE reason): it cannot receive electronic invoices until it selects its receiving Approved Platform.
 LemonSuperPDPPrecheckDirectory = Check directory before sending
 LemonSuperPDPPrecheckDirectoryHelp = Before each sending, queries the Approved Platforms directory to check that the recipient is reachable, with a clear message otherwise. Automatically disabled in sandbox mode.
 LemonSuperPDPMenuEreporting = B2C e-reporting (SUPER PDP)
@@ -184,3 +185,29 @@ LemonSuperPDPNoEvent = No event
 LemonSuperPDPProgression = Progress
 LemonSuperPDPForceResend = Force resend to SUPER PDP
 LemonSuperPDPForceResendConfirm = Resend the invoice to SUPER PDP even if it was already transmitted?
+
+# XP Z12-012 lifecycle compliance — official status labels (BR-FR-CDV-CL-05)
+LemonSuperPDPFrStatusfr200 = Submitted
+LemonSuperPDPFrStatusfr201 = Sent by the platform
+LemonSuperPDPFrStatusfr202 = Received by the platform
+LemonSuperPDPFrStatusfr203 = Made available
+LemonSuperPDPFrStatusfr204 = Acknowledged
+LemonSuperPDPFrStatusfr205 = Approved
+LemonSuperPDPFrStatusfr206 = Partially approved
+LemonSuperPDPFrStatusfr207 = Disputed
+LemonSuperPDPFrStatusfr208 = On hold
+LemonSuperPDPFrStatusfr209 = Completed
+LemonSuperPDPFrStatusfr210 = Refused
+LemonSuperPDPFrStatusfr211 = Payment sent
+LemonSuperPDPFrStatusfr212 = Payment received
+LemonSuperPDPFrStatusfr213 = Rejected
+LemonSuperPDPFrStatusfr501 = Inadmissible
+
+# Status reasons (MDT-113 / MDT-114, rule BR-FR-CDV-15)
+LemonSuperPDPReasonCode = Reason code
+LemonSuperPDPReasonText = Comment (free text, kept locally)
+LemonSuperPDPReasonCodePlaceholder = Reason code (MDT-113)
+LemonSuperPDPReasonTextPlaceholder = Free comment (optional)
+LemonSuperPDPReasonRequired = Status %s requires a reason (MDT-113 code): please enter a reason code before sending (rule BR-FR-CDV-15 of the XP Z12-012 standard).
+LemonSuperPDPReasonRequiredJs = This status requires a reason code (rule BR-FR-CDV-15). Please fill it in before sending.
+LemonSuperPDPRecRefuseTitle = Refuse the received invoice (fr:210)
