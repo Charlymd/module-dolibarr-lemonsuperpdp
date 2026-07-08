@@ -12,12 +12,17 @@
   "compatibility": {
     "1.x": {
       "dolibarr_min": "18.0.0",
-      "dolibarr_max": "22.*",
+      "dolibarr_max": "23.*",
       "php_min": "7.4"
     }
   },
   "dependencies": {
-    "modules": ["lemonfacturx"],
-    "php_extensions": ["curl", "json"]
+    "modules": [
+      "lemonfacturx"
+    ],
+    "php_extensions": [
+      "curl",
+      "json"
+    ]
   }
 }

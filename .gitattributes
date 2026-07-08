@@ -1,0 +1,4 @@
+# Exclusions d'archive : le ZIP Dolistore (git archive) ne doit contenir que
+# les fichiers du module distribué — pas l'outillage du repo.
+/.gitattributes export-ignore
+/.gitignore export-ignore
