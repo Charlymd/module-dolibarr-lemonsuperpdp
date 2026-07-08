@@ -266,14 +266,26 @@ class LemonSuperPDPReception extends CommonObject
 
 				if ($rec->status === self::STATUS_QUARANTINE) {
 					$nbQuarantined++;
+					// Notification comptable (non bloquante) : nouvelle facture en quarantaine.
+					$rec->notifyNewReception();
 					continue;
 				}
 
 				$ret = $rec->importAsSupplierInvoice($user, $client);
 				if ($ret > 0) {
 					$nbImported++;
+					// Notification comptable (non bloquante) : nouvelle facture importée en brouillon.
+					$rec->notifyNewReception();
 				} else {
 					$nbErrors++;
+					// Quarantaine posée par importAsSupplierInvoice (devise étrangère)
+					// OU échec technique d'import (STATUS_ERROR) : dans les deux cas
+					// c'est une nouvelle facture qui attend une action manuelle — le
+					// comptable doit être prévenu, sinon elle passe sous le radar
+					// (le polling ne la représentera jamais : dédup par superpdp_id).
+					if (in_array($rec->status, array(self::STATUS_QUARANTINE, self::STATUS_ERROR), true)) {
+						$rec->notifyNewReception();
+					}
 				}
 			}
 		}
@@ -652,6 +664,108 @@ class LemonSuperPDPReception extends CommonObject
 			throw new Exception('Écriture du fichier impossible');
 		}
 		dolChmod($filepath);
+	}
+
+	/**
+	 * Notifie par e-mail (constante LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL)
+	 * l'arrivée d'une NOUVELLE facture fournisseur reçue via la plateforme :
+	 * soit importée en brouillon (lien direct vers la FactureFournisseur),
+	 * soit mise en quarantaine (lien vers l'écran « Factur-X reçues »).
+	 *
+	 * Anti-doublon : à n'appeler QUE sur une réception nouvellement créée par
+	 * le polling (syncIncoming) — jamais sur une re-synchronisation (les
+	 * réceptions déjà connues sont écartées en amont par existsBySuperpdpId)
+	 * ni sur un ré-import manuel depuis l'écran de quarantaine.
+	 *
+	 * Non bloquant : tout échec d'envoi est journalisé en warning et
+	 * n'interrompt jamais l'import de la facture ni le cron.
+	 *
+	 * @return int  1 notification envoyée, 0 non configurée ou échec (journalisé)
+	 */
+	public function notifyNewReception()
+	{
+		global $langs;
+
+		$sendto = trim(getDolGlobalString('LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL', ''));
+		if ($sendto === '') {
+			return 0;
+		}
+
+		try {
+			require_once DOL_DOCUMENT_ROOT.'/core/class/CMailFile.class.php';
+
+			$langs->loadLangs(array('lemonsuperpdp@lemonsuperpdp'));
+
+			$from = getDolGlobalString('MAIN_MAIL_EMAIL_FROM', '');
+			if ($from === '') {
+				dol_syslog('LemonSuperPDPReception::notifyNewReception : MAIN_MAIL_EMAIL_FROM non configuré, notification ignorée', LOG_WARNING);
+				return 0;
+			}
+
+			// Quarantaine ET erreur d'import : même traitement de notification
+			// (facture en attente d'action manuelle, lien vers l'écran de suivi).
+			$isQuarantine = in_array($this->status, array(self::STATUS_QUARANTINE, self::STATUS_ERROR), true);
+
+			$subject = $isQuarantine
+				? $langs->transnoentities('LemonSuperPDPRecNotifySubjectQuarantine')
+				: $langs->transnoentities('LemonSuperPDPRecNotifySubjectImported');
+
+			$lines = array();
+			$lines[] = '<p>'.($isQuarantine
+				? $langs->transnoentities('LemonSuperPDPRecNotifyBodyQuarantine')
+				: $langs->transnoentities('LemonSuperPDPRecNotifyBodyImported')).'</p>';
+
+			// Détails de la facture : toute donnée tierce est échappée.
+			$details = array();
+			if (!empty($this->supplier_name)) {
+				$details[] = '<li>'.$langs->transnoentities('LemonSuperPDPRecNotifySupplier').' : '.dol_escape_htmltag($this->supplier_name).'</li>';
+			}
+			if (!empty($this->invoice_number)) {
+				$details[] = '<li>'.$langs->transnoentities('LemonSuperPDPRecNumber').' : '.dol_escape_htmltag($this->invoice_number).'</li>';
+			}
+			if ($this->total_ttc !== null) {
+				$details[] = '<li>'.$langs->transnoentities('LemonSuperPDPRecNotifyAmountTTC').' : '.price($this->total_ttc).(!empty($this->currency_code) ? ' '.dol_escape_htmltag($this->currency_code) : '').'</li>';
+			}
+			if ($isQuarantine && !empty($this->error_message)) {
+				$details[] = '<li>'.$langs->transnoentities('LemonSuperPDPRecNotifyReason').' : '.dol_escape_htmltag($this->error_message).'</li>';
+			}
+			if (!empty($details)) {
+				$lines[] = '<ul>'.implode("\n", $details).'</ul>';
+			}
+
+			// Lien direct : la facture brouillon si elle existe, sinon l'écran
+			// « Factur-X reçues » pour traiter la quarantaine.
+			// Défensif : en contexte cron CLI, dol_buildpath(…, 2) dépend de
+			// $dolibarr_main_url_root (conf.php) — si elle est vide/mal posée,
+			// l'URL n'a pas de host. On n'insère JAMAIS un lien cassé dans un
+			// e-mail : dans ce cas les références texte ci-dessus suffisent.
+			if (!$isQuarantine && !empty($this->fk_facture_fourn)) {
+				$url = dol_buildpath('/fourn/facture/card.php', 2).'?id='.((int) $this->fk_facture_fourn);
+				$linkLabel = $langs->transnoentities('LemonSuperPDPRecNotifyLinkInvoice');
+			} else {
+				$url = dol_buildpath('/lemonsuperpdp/reception_list.php', 2);
+				$linkLabel = $langs->transnoentities('LemonSuperPDPRecNotifyLinkList');
+			}
+			if (strpos($url, 'http') === 0) {
+				$lines[] = '<p><a href="'.dol_escape_htmltag($url).'">'.$linkLabel.'</a></p>';
+			} else {
+				dol_syslog('LemonSuperPDPReception::notifyNewReception : dolibarr_main_url_root non résolu ("'.$url.'"), lien omis du mail', LOG_WARNING);
+			}
+
+			$body = implode("\n", $lines);
+
+			$mailfile = new CMailFile($subject, $sendto, $from, $body, array(), array(), array(), '', '', 0, 1);
+			if (!$mailfile->sendfile()) {
+				dol_syslog('LemonSuperPDPReception::notifyNewReception : échec de l\'envoi à '.$sendto.' — '.$mailfile->error, LOG_WARNING);
+				return 0;
+			}
+
+			dol_syslog('LemonSuperPDPReception::notifyNewReception : notification envoyée à '.$sendto.' (réception '.((int) $this->id).')', LOG_INFO);
+			return 1;
+		} catch (Exception $e) {
+			dol_syslog('LemonSuperPDPReception::notifyNewReception : '.$e->getMessage(), LOG_WARNING);
+			return 0;
+		}
 	}
 
 	/**

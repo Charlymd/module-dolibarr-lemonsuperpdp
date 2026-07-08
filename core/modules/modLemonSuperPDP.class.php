@@ -27,7 +27,7 @@ class modLemonSuperPDP extends DolibarrModules
 		$this->name = preg_replace('/^mod/i', '', get_class($this));
 		$this->description = "Émission et réception des factures électroniques via la Plateforme Agréée SUPER PDP";
 		$this->descriptionlong = "Envoie les factures clients Factur-X (générées par LemonFacturX) via l'API de la Plateforme Agréée SUPER PDP, synchronise les statuts de cycle de vie (déposée, acceptée, refusée, encaissée), et importe les factures fournisseurs reçues sur la plateforme en factures fournisseurs Dolibarr brouillon.";
-		$this->version = '1.3.0';
+		$this->version = '1.4.0';
 		$this->const_name = 'MAIN_MODULE_'.strtoupper($this->name);
 		$this->picto = 'bill';
 		$this->editor_name = 'Lemon';
@@ -86,6 +86,8 @@ class modLemonSuperPDP extends DolibarrModules
 			array('LEMONSUPERPDP_LAST_EVENT_ID', 'chaine', '0', 'Dernier invoice_event synchronisé', 1, 'current', 0),
 			array('LEMONSUPERPDP_IN_ENABLED', 'int', '0', 'Activer la réception des factures fournisseurs (direction=in)', 1, 'current', 0),
 			array('LEMONSUPERPDP_LAST_IN_ID', 'chaine', '0', 'Dernière facture reçue synchronisée (curseur direction=in)', 1, 'current', 0),
+			// Notification à la réception : une seule constante, la notification est active dès que l'adresse est non vide (pas de booléen séparé).
+			array('LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL', 'chaine', '', 'E-mail notifié à chaque nouvelle facture fournisseur reçue via SUPER PDP (vide = notification désactivée)', 1, 'current', 0),
 			array('LEMONSUPERPDP_EREPORTING_ENABLED', 'int', '0', 'Activer l\'e-reporting B2C (transactions et paiements des factures aux particuliers)', 1, 'current', 0),
 			array('LEMONSUPERPDP_PRECHECK_DIRECTORY', 'int', '1', 'Vérifier l\'annuaire des Plateformes Agréées avant chaque envoi', 1, 'current', 0),
 			// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
@@ -309,7 +311,7 @@ class modLemonSuperPDP extends DolibarrModules
 		// fr:213/fr:501 = rejets posés par les plateformes → pdp.
 		// fr:212 émis par nous (direction='out') → fournisseur ; reçu (direction='in') → client
 		$fournisseur = "'fr:200','fr:201','fr:202','fr:203','api:uploaded','facturx:generated','facturx:error'";
-		$pdp         = "'ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR','fr:213','fr:501'";
+		$pdp         = "'ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR','fr:213','fr:501','api:validated','api:invalid','api:error'";
 		$client      = "'fr:204','fr:205','fr:206','fr:207','fr:208','fr:209','fr:210','fr:211'";
 		$backfills = array(
 			"UPDATE `" . $table . "` SET flux = 'fournisseur' WHERE status_code IN (" . $fournisseur . ") AND (flux IS NULL OR flux = '')",

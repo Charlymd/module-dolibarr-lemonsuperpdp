@@ -975,9 +975,15 @@ class ActionsLemonSuperPDP
 	 * en base s'ils n'existent pas déjà. Appelé par le bouton "Rafraîchir"
 	 * sur la fiche facture et par le cron de synchronisation.
 	 *
+	 * @param Facture $facture Facture concernée
+	 * @param User    $user    Utilisateur courant
+	 * @param bool    $quick   true = timeout court (8 s) — pour les appels
+	 *                         exécutés pendant le rendu d'une page (auto-refresh
+	 *                         de l'onglet), afin de ne jamais geler l'affichage
+	 *                         quand la plateforme est lente ou en panne.
 	 * @return int Nombre d'events nouvellement insérés
 	 */
-	public function refreshEventsForFacture($facture, $user)
+	public function refreshEventsForFacture($facture, $user, $quick = false)
 	{
 		dol_include_once('/lemonsuperpdp/class/transmission.class.php');
 		dol_include_once('/lemonsuperpdp/class/event.class.php');
@@ -989,6 +995,9 @@ class ActionsLemonSuperPDP
 		}
 
 		$client = new SuperPDPClient($this->db);
+		if ($quick) {
+			$client->requestTimeout = 8;
+		}
 		$data = $client->getInvoice((int) $t->superpdp_id);
 
 		// L'objet facture SUPER PDP contient un champ invoice_events étendu

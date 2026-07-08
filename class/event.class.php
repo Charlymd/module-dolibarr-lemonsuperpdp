@@ -372,7 +372,11 @@ class LemonSuperPDPEvent extends CommonObject
 			$fkSoc = (int) $this->db->fetch_object($resSoc)->fk_soc;
 		}
 
-		$label = !empty($this->message) ? $this->message : self::getStatusLabel($this->status_code);
+		// Si le message stocké n'est que le code technique brut (ex. 'api:uploaded'),
+		// on lui préfère le libellé lisible de getStatusLabel().
+		$label = (!empty($this->message) && $this->message !== $this->status_code)
+			? $this->message
+			: self::getStatusLabel($this->status_code);
 		$dirSuffix = ($this->direction === self::DIRECTION_OUT) ? ' (émis)' : ' (reçu)';
 
 		$note = 'Événement SUPER PDP '.$this->status_code.' : '.$label.$dirSuffix;
@@ -392,7 +396,10 @@ class LemonSuperPDPEvent extends CommonObject
 		$ac = new ActionComm($this->db);
 		$ac->type_code    = 'AC_OTH_AUTO';
 		$ac->code         = 'LEMONSUPERPDP_'.strtoupper(str_replace(array(':', '-'), '_', $this->status_code));
-		$ac->label        = 'SUPER PDP : '.$label.' ('.$this->status_code.')';
+		// Code entre parenthèses seulement pour les statuts AFNOR fr:2xx/fr:501
+		// (utile comme référence) — pas pour les codes techniques internes.
+		$showCode = (strpos((string) $this->status_code, 'fr:') === 0);
+		$ac->label        = 'SUPER PDP : '.$label.($showCode ? ' ('.$this->status_code.')' : '');
 		$ac->note_private = $note;
 		$ac->elementtype  = 'invoice';
 		$ac->fk_element   = (int) $fkFacture;
@@ -451,6 +458,20 @@ class LemonSuperPDPEvent extends CommonObject
 			'ACK-02' => 'Validation de format',
 			'REJECT' => 'Rejet technique',
 			'ROUTE'  => 'Routage confirmé',
+			// Codes internes LemonSuperPDP (hors réforme fr:2xx) : suivi local
+			// (envoi API, génération Factur-X, erreurs techniques) qui ne
+			// transitent pas par l'AFNOR mais alimentent les mêmes events.
+			'api:uploaded'      => 'Téléversée vers SUPER PDP',
+			'api:recovered'     => 'Facture déjà présente sur SUPER PDP',
+			// « Dépôt » et non « Format » : le contrôle d'entrée de la plateforme
+			// peut refuser pour d'autres causes que le fichier lui-même
+			// (adressage du destinataire, annuaire…) — ne pas accuser la Factur-X.
+			'api:validated'     => 'Dépôt accepté par SUPER PDP',
+			'api:invalid'       => 'Dépôt refusé par SUPER PDP',
+			'api:error'         => 'Erreur API',
+			'ERROR'             => 'Erreur',
+			'facturx:generated' => 'Factur-X généré',
+			'facturx:error'     => 'Erreur de génération Factur-X',
 		);
 		return isset($map[$statusCode]) ? $map[$statusCode] : $statusCode;
 	}

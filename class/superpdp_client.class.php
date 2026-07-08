@@ -45,6 +45,14 @@ class SuperPDPClient
 	public $error = '';
 	public $errors = array();
 
+	/**
+	 * Timeout (secondes) des appels API standards. 60 s par défaut (upload de
+	 * PDF inclus) ; les appels « confort » exécutés pendant le rendu d'une page
+	 * (auto-refresh de l'onglet cycle de vie) le réduisent pour ne jamais geler
+	 * l'affichage quand la plateforme est lente ou injoignable.
+	 */
+	public $requestTimeout = 60;
+
 	private $endpoint;
 	private $clientId;
 	private $clientSecret;
@@ -360,7 +368,7 @@ class SuperPDPClient
 			$headers[] = 'Content-Type: '.$contentType;
 		}
 
-		$call = $this->httpCall($method, $url, $body, $headers, 60);
+		$call = $this->httpCall($method, $url, $body, $headers, (int) $this->requestTimeout);
 
 		if ($call['error']) {
 			dol_syslog('SuperPDPClient::request curl error : '.$call['error'], LOG_ERR);
@@ -408,6 +416,9 @@ class SuperPDPClient
 		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_TIMEOUT, (int) $timeout);
+		// Borne l'établissement de la connexion : un hôte injoignable (panne,
+		// DNS, réseau) échoue en 5 s au lieu de consommer tout le timeout.
+		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 		// Vérification TLS forcée explicitement (ce chemin porte le client_secret
 		// et le Bearer) — ne pas dépendre du défaut libcurl de l'hôte client.

@@ -107,13 +107,64 @@ if ($action === 'forcesuperpdpsend' && $canTransmitWrite) {
     exit;
 }
 
+// Rafraîchissement manuel des statuts : re-polle la PA pour cette facture.
+// C'est la voie fiable quand le cron « Sync events SUPER PDP » n'est pas
+// déclenché sur l'installation (l'auto-refresh plus bas n'est qu'un confort).
+// Throttle en session (30 s) : pas d'appels illimités à l'API tierce sur un
+// F5 répété, et aucune écriture en base sur un GET.
+if ($action === 'refreshsuperpdpevents' && $canTransmitRead) {
+    if (GETPOST('token', 'alpha') !== currentToken()) {
+        setEventMessages('Bad CSRF token', null, 'errors');
+    } elseif (!empty($_SESSION['lsp_refresh_'.$fk]) && (dol_now() - (int) $_SESSION['lsp_refresh_'.$fk]) < 30) {
+        setEventMessages($langs->trans('LemonSuperPDPRefreshThrottled'), null, 'warnings');
+    } else {
+        $_SESSION['lsp_refresh_'.$fk] = dol_now();
+        dol_include_once('/lemonsuperpdp/class/actions_lemonsuperpdp.class.php');
+        $refresher = new ActionsLemonSuperPDP($db);
+        try {
+            $nb = $refresher->refreshEventsForFacture($object, $user);
+            setEventMessages($langs->trans('LemonSuperPDPRefreshDone', (int) $nb), null, 'mesgs');
+        } catch (Exception $e) {
+            dol_syslog('LemonSuperPDP tab_lifecycle refresh events facture '.$fk.' : '.$e->getMessage(), LOG_ERR);
+            if ((int) $e->getCode() === 404) {
+                // La facture n'existe pas (ou plus) côté plateforme : dépôt
+                // refusé (api:invalid), purge, ou identifiant d'un autre
+                // environnement. Rien à rafraîchir — proposer le renvoi.
+                setEventMessages($langs->trans('LemonSuperPDPRefreshNotFound'), null, 'warnings');
+            } else {
+                setEventMessages($langs->trans('LemonSuperPDPRefreshError').' — '.dol_escape_htmltag($e->getMessage()), null, 'errors');
+            }
+        }
+    }
+    header('Location: '.dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1).'?id='.$fk);
+    exit;
+}
+
+// Vérification Factur-X sans quitter l'onglet. verifyInvoicePdf() est
+// publique depuis LemonFacturX 3.9.1 ; sur un LemonFacturX antérieur elle
+// est protected (appel direct = fatale) → on vérifie la visibilité par
+// réflexion et on retombe alors sur la fiche facture, où le hook doActions
+// de LemonFacturX traite nativement action=lemonfacturx_verify.
 if ($action === 'lemonfacturx_verify' && $canRead) {
     if (GETPOST('token', 'alpha') !== currentToken()) {
         setEventMessages('Bad CSRF token', null, 'errors');
-    } elseif (isModEnabled('lemonfacturx') && getDolGlobalInt('LEMONFACTURX_ENABLED')) {
+    } elseif (isModEnabled('lemonfacturx')) {
         dol_include_once('/lemonfacturx/class/actions_lemonfacturx.class.php');
         $lfx = new ActionsLemonFacturX($db);
-        $lfx->verifyInvoicePdf($object);
+        $lfxCallable = false;
+        try {
+            $lfxRm = new ReflectionMethod($lfx, 'verifyInvoicePdf');
+            $lfxCallable = $lfxRm->isPublic();
+        } catch (ReflectionException $e) {
+            $lfxCallable = false;
+        }
+        if ($lfxCallable) {
+            $lfx->verifyInvoicePdf($object);
+        } else {
+            // LemonFacturX < 3.9.1 : déléguer au hook de la fiche facture.
+            header('Location: '.dol_buildpath('/compta/facture/card.php', 1).'?facid='.$fk.'&action=lemonfacturx_verify&token='.newToken());
+            exit;
+        }
     } else {
         setEventMessages('Module LemonFacturX non activé.', null, 'warnings');
     }
@@ -201,6 +252,52 @@ if ($action === 'send_lifecycle_status' && $canTransmitWrite) {
 $transmission = new LemonSuperPDPTransmission($db);
 $transmission->fetchLastByFacture($fk);
 
+// ── Auto-rafraîchissement des événements (confort) ──────────────────────────
+// Le cron « Sync events SUPER PDP » reste la voie nominale ; sur une install
+// où il n'est pas déclenché, on re-polle la PA à l'ouverture de l'onglet.
+// Garde-fous :
+//  - seulement si une transmission avec un superpdp_id existe ;
+//  - jamais sur un statut final (fr:210 Refusée, fr:212 Encaissée,
+//    fr:213 Rejetée, fr:501 Irrecevable) — inutile de re-poller ;
+//  - throttle en SESSION (3 min par facture) : pas de re-poll à chaque F5,
+//    et aucune écriture en base sur un simple GET (pas de constante fantôme
+//    dans llx_const, rien à purger à la désinstallation) ;
+//  - timeout court ($quick : 8 s + connexion 5 s) : une PA lente ou en panne
+//    ne gèle pas le rendu de l'onglet ;
+//  - en cas d'échec API on log et on rend l'onglet avec les données en cache
+//    (le bouton « Rafraîchir » reste la voie fiable).
+// Statuts pour lesquels re-poller la PA n'a pas de sens : statuts FINALS
+// (rien ne bougera plus) et échecs LOCAUX de dépôt (api:invalid = refusée à
+// l'upload, api:error/facturx:error = jamais partie) — dans ces derniers cas
+// l'identifiant n'existe pas côté plateforme (GET = 404), la voie correcte
+// est « Forcer l'envoi ».
+$lspNoRefresh = in_array((string) $transmission->status_raw, array(
+    'fr:210', 'fr:212', 'fr:213', 'fr:501',
+    'api:invalid', 'api:error', 'facturx:error',
+), true);
+if ($canTransmitRead && getDolGlobalInt('LEMONSUPERPDP_ENABLED')
+    && $transmission->id > 0 && !empty($transmission->superpdp_id)
+    && !$lspNoRefresh) {
+    $lspLastAuto = !empty($_SESSION['lsp_refresh_'.$fk]) ? (int) $_SESSION['lsp_refresh_'.$fk] : 0;
+    if ((dol_now() - $lspLastAuto) >= 180) {
+        // Horodatage AVANT l'appel : même si l'API échoue, on ne re-tente pas
+        // à chaque chargement de page (pas de martèlement d'une PA en panne).
+        $_SESSION['lsp_refresh_'.$fk] = dol_now();
+        try {
+            dol_include_once('/lemonsuperpdp/class/actions_lemonsuperpdp.class.php');
+            $lspRefresher = new ActionsLemonSuperPDP($db);
+            $lspNb = $lspRefresher->refreshEventsForFacture($object, $user, true);
+            dol_syslog('LemonSuperPDP tab_lifecycle auto-refresh facture '.$fk.' : '.((int) $lspNb).' nouvel(s) événement(s)', LOG_DEBUG);
+            // Recharge la transmission : son statut a pu être mis à jour.
+            $transmission = new LemonSuperPDPTransmission($db);
+            $transmission->fetchLastByFacture($fk);
+        } catch (Exception $e) {
+            // Non bloquant : on affiche l'onglet avec les événements en cache.
+            dol_syslog('LemonSuperPDP tab_lifecycle auto-refresh facture '.$fk.' en échec (ignoré) : '.$e->getMessage(), LOG_WARNING);
+        }
+    }
+}
+
 // ── Chargement événements ────────────────────────────────────────────────────
 $events_raw = array();
 $sql = 'SELECT e.rowid, e.status_code, e.flux, e.direction, e.event_date, e.message, e.payload_raw'
@@ -212,6 +309,16 @@ $sql = 'SELECT e.rowid, e.status_code, e.flux, e.direction, e.event_date, e.mess
 $resq = $db->query($sql);
 if ($resq) {
     while ($obj = $db->fetch_object($resq)) {
+        // Sans message stocké, la raison du verdict plateforme (data.reason du
+        // payload, ex. « Invalid partner address » sur un api:invalid) est
+        // l'information la plus utile au diagnostic : on la remonte dans le
+        // libellé (traduite si connue) au lieu de la laisser dormir dans le JSON.
+        if (empty($obj->message) && !empty($obj->payload_raw)) {
+            $lspPayload = json_decode((string) $obj->payload_raw, true);
+            if (is_array($lspPayload) && !empty($lspPayload['data']['reason']) && is_string($lspPayload['data']['reason'])) {
+                $obj->message = lsp_label($obj->status_code).' — '.lsp_reason($lspPayload['data']['reason']);
+            }
+        }
         $events_raw[] = $obj;
     }
     $db->free($resq);
@@ -370,14 +477,15 @@ print '<div class="fichecenter">';
       </div>
       <?php if ($evt): ?>
       <?php
+        // Texte lisible sur plusieurs lignes (3 max) plutôt que tronqué :
+        // la raison d'un rejet doit se lire sans devoir survoler la boîte.
         $evtMsg       = isset($evt->message) ? (string) $evt->message : '';
         $evtFull      = lsp_label($evt->status_code, $evtMsg);
-        $evtShort     = mb_strimwidth($evtFull, 0, 36, '…');
-        $evtTitle     = ($evtFull !== $evtShort) ? $evtFull : $evtMsg;
-        $evtNeedTitle = ($evtFull !== $evtShort) || ($evt->status_code === 'ERROR' && $evtMsg);
+        $evtShort     = mb_strimwidth($evtFull, 0, 160, '…');
+        $evtNeedTitle = ($evtFull !== $evtShort);
       ?>
-      <div style="font-size:12px;font-weight:500;color:#2c2c2a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;<?php echo $evtNeedTitle ? 'text-decoration:underline dotted;cursor:help;' : ''; ?>"
-           <?php echo $evtNeedTitle ? 'title="'.dol_escape_htmltag($evtTitle).'"' : ''; ?>>
+      <div style="font-size:12px;font-weight:500;color:#2c2c2a;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow-wrap:anywhere;<?php echo $evtNeedTitle ? 'cursor:help;' : ''; ?>"
+           <?php echo $evtNeedTitle ? 'title="'.dol_escape_htmltag($evtFull).'"' : ''; ?>>
         <?php echo dol_escape_htmltag($evtShort); ?>
       </div>
       <div style="font-size:10px;color:#888780;margin-top:2px;"><?php echo dol_print_date($db->jdate($evt->event_date), 'dayhour'); ?></div>
@@ -407,7 +515,18 @@ print '<div class="fichecenter">';
   <!-- Barre d'action -->
   <?php if ($canRead || $canWrite): ?>
   <div style="display:flex;align-items:center;gap:8px;padding:8px 0 0;border-top:1px solid #e0ddd6;margin-top:4px;flex-wrap:wrap;">
-    <?php if ($canRead && isModEnabled('lemonfacturx') && getDolGlobalInt('LEMONFACTURX_ENABLED')): ?>
+    <?php if ($canTransmitRead && $transmission->id > 0 && !empty($transmission->superpdp_id)): ?>
+      <?php if (empty($lspNoRefresh)): ?>
+    <a class="butAction" href="<?php echo dol_escape_htmltag(dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1).'?id='.$fk.'&action=refreshsuperpdpevents&token='.newToken()); ?>">
+      &#x21BB; <?php echo $langs->trans('LemonSuperPDPRefreshButton'); ?>
+    </a>
+      <?php else: // statut final ou dépôt refusé : bouton visible mais grisé, avec l'explication au survol ?>
+    <span class="butActionRefused classfortooltip" title="<?php echo dol_escape_htmltag($langs->trans('LemonSuperPDPRefreshDisabledTooltip')); ?>">
+      &#x21BB; <?php echo $langs->trans('LemonSuperPDPRefreshButton'); ?>
+    </span>
+      <?php endif; ?>
+    <?php endif; ?>
+    <?php if ($canRead && isModEnabled('lemonfacturx')): ?>
     <a class="butAction" href="<?php echo dol_escape_htmltag(dol_buildpath('/lemonsuperpdp/tab_lifecycle.php', 1).'?id='.$fk.'&action=lemonfacturx_verify&token='.newToken()); ?>">
       Vérifier la Factur-X
     </a>
@@ -496,33 +615,55 @@ function lsp_flux($code, $flux_db = '')
     }
     // fr:200..fr:203 = statuts de transmission (plateformes) → ligne fournisseur ;
     // fr:213/fr:501 = rejets posés par les plateformes → ligne PDP/PA ;
+    // api:validated/api:invalid/api:error = verdicts du contrôle d'entrée de la
+    // plateforme (la facture n'a jamais atteint le client) → ligne PDP/PA ;
     // le reste (fr:204..fr:211, traitement acheteur) → ligne client.
     $fournisseur = array('fr:200','fr:201','fr:202','fr:203','api:uploaded','api:recovered','facturx:generated','facturx:error');
-    $pdp         = array('ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR','fr:213','fr:501');
+    $pdp         = array('ACK','ACK-01','ACK-02','REJECT','ROUTE','ERROR','fr:213','fr:501','api:validated','api:invalid','api:error');
     if (in_array($code, $fournisseur, true)) return 'fournisseur';
     if (in_array($code, $pdp, true))         return 'pdp';
     return 'client';
 }
 
+/**
+ * Traduit en français les raisons de rejet renvoyées par l'API SUPER PDP
+ * (chaînes libres en anglais, non normalisées dans la spec). Mapping
+ * best-effort des raisons rencontrées ; toute raison inconnue est affichée
+ * telle quelle plutôt que masquée.
+ */
+function lsp_reason($reason)
+{
+    $map = array(
+        'Invalid partner address' => 'adresse électronique du destinataire invalide',
+    );
+    return isset($map[$reason]) ? $map[$reason] : $reason;
+}
+
 function lsp_label($code, $override = '')
 {
-    // Cas spéciaux non couverts par LemonSuperPDPEvent::getStatusLabel()
-    if ($code === 'ERROR')         return 'Erreur envoi statut';
-    if ($code === 'api:recovered') return !empty($override) ? lsp_plain($override) : 'Déjà présente sur SUPER PDP';
-    if ($code === 'REJECT') return !empty($override) ? lsp_plain($override) : 'Rejet SUPER PDP';
-    if ($code === 'api:uploaded')        return !empty($override) ? lsp_plain($override) : 'Accusé réception téléversement';
+    // Un message qui n'est que le code technique brut (ex. 'api:uploaded')
+    // n'apporte rien : on l'ignore pour retomber sur le libellé lisible.
+    if ($override === $code) {
+        $override = '';
+    }
+    // Seule logique réellement spécifique à cet écran : distinguer la
+    // génération Factur-X provisoire de la validée. Le message peut contenir
+    // " — fichier.pdf" (ajouté par createAndLog depuis last_main_doc) :
+    // présence d'un nom de fichier = deuxième génération (validée).
     if ($code === 'facturx:generated') {
-        // Le message peut contenir " — fichier.pdf" (ajouté par createAndLog depuis last_main_doc).
-        // Présence d'un nom de fichier = deuxième génération (validée).
-        // Absence = première génération automatique (provisoire).
         if (!empty($override) && preg_match('/\s—\s\S.+\.\w+$/', $override)) {
             return 'Factur-X généré — validée';
         }
         return 'Factur-X généré — provisoire';
     }
-    if ($code === 'facturx:error')     return !empty($override) ? lsp_plain($override) : 'Erreur génération Factur-X';
-    if (!empty($override)) return lsp_plain($override);
-    // Délègue à la source de vérité pour les codes AFNOR et ACK/REJECT/ROUTE
+    // Un message enrichi (différent du code) reste prioritaire : il porte du
+    // contexte (nom de fichier, détail d'erreur) que le libellé générique n'a pas.
+    if (!empty($override)) {
+        return lsp_plain($override);
+    }
+    // Sinon : source de vérité UNIQUE des libellés (codes AFNOR fr:2xx,
+    // ACK/REJECT/ROUTE et codes internes api:*/facturx:*) — même vocabulaire
+    // que les événements d'agenda, pas de doublon codé en dur ici.
     return LemonSuperPDPEvent::getStatusLabel($code);
 }
 

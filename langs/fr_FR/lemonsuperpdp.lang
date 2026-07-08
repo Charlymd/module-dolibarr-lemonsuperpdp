@@ -86,6 +86,10 @@ LemonSuperPDPEventDirectionOut = Émis
 # Actions events
 LemonSuperPDPRefreshDone = %s nouvel(s) événement(s) récupéré(s) depuis SUPER PDP
 LemonSuperPDPRefreshError = Impossible de rafraîchir les événements
+LemonSuperPDPRefreshButton = Rafraîchir les statuts
+LemonSuperPDPRefreshThrottled = Statuts déjà rafraîchis il y a moins de 30 secondes — veuillez patienter avant de relancer
+LemonSuperPDPRefreshDisabledTooltip = Rien à rafraîchir : le dépôt a été refusé par la plateforme ou le statut est définitif. Pour redéposer la facture, utilisez « Forcer l'envoi ».
+LemonSuperPDPRefreshNotFound = Cette facture est introuvable sur SUPER PDP (dépôt refusé ou purgé) : rien à rafraîchir. Utilisez « Forcer l'envoi » pour la redéposer.
 LemonSuperPDPSendStatusPrompt = Choisir un statut à envoyer…
 LemonSuperPDPSendStatusButton = Envoyer le statut
 LemonSuperPDPSendStatusConfirm = Confirmer l'envoi du statut
@@ -222,3 +226,17 @@ LemonSuperPDPReasonTextPlaceholder = Commentaire libre (optionnel)
 LemonSuperPDPReasonRequired = Le statut %s exige un motif (code MDT-113) : saisissez un code motif avant l'envoi (règle BR-FR-CDV-15 de la norme XP Z12-012).
 LemonSuperPDPReasonRequiredJs = Ce statut exige un code motif (règle BR-FR-CDV-15). Merci de le renseigner avant l'envoi.
 LemonSuperPDPRecRefuseTitle = Refuser la facture reçue (fr:210)
+
+# Notification e-mail à la réception d'une facture fournisseur
+LemonSuperPDPRecNotifyEmail = E-mail de notification à la réception
+LemonSuperPDPRecNotifyEmailHelp = Si renseigné, un e-mail est envoyé à cette adresse à chaque nouvelle facture fournisseur reçue via SUPER PDP (importée en brouillon ou mise en quarantaine), pour prévenir votre comptable. Laisser vide pour désactiver la notification.
+LemonSuperPDPRecNotifyEmailInvalid = L'adresse e-mail de notification n'est pas valide : elle n'a pas été enregistrée
+LemonSuperPDPRecNotifySubjectImported = [SUPER PDP] Nouvelle facture fournisseur reçue
+LemonSuperPDPRecNotifySubjectQuarantine = [SUPER PDP] Nouvelle facture fournisseur en quarantaine
+LemonSuperPDPRecNotifyBodyImported = Une nouvelle facture fournisseur a été reçue via la plateforme SUPER PDP et importée dans Dolibarr en brouillon. Pensez à la vérifier puis à la valider.
+LemonSuperPDPRecNotifyBodyQuarantine = Une nouvelle facture fournisseur a été reçue via la plateforme SUPER PDP, mais elle n'a pas pu être importée automatiquement : elle est en quarantaine et attend une action manuelle.
+LemonSuperPDPRecNotifySupplier = Fournisseur
+LemonSuperPDPRecNotifyAmountTTC = Montant TTC
+LemonSuperPDPRecNotifyReason = Motif
+LemonSuperPDPRecNotifyLinkInvoice = Ouvrir la facture fournisseur en brouillon
+LemonSuperPDPRecNotifyLinkList = Ouvrir l'écran « Factur-X reçues »

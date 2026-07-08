@@ -8,7 +8,7 @@ Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et commun
 
 ## Statut
 
-Version 1.3.0 — phase pilote SUPER PDP, cycle de vie aligné sur la norme XP Z12-012 (édition juin 2026). Fonctionnalités :
+Version 1.4.0 — confort d'exploitation : bouton « Rafraîchir les statuts » sur la facture (+ rafraîchi auto à l'ouverture de l'onglet, sans dépendre du cron), notification e-mail à la réception d'une facture fournisseur, libellés d'événements plus lisibles. Cycle de vie aligné sur la norme XP Z12-012 (édition juin 2026). Fonctionnalités :
 
 - **Réception des factures fournisseurs** : polling de l'API (`direction=in`), rattachement automatique du tiers par SIREN/SIRET, création de la facture fournisseur Dolibarr **en brouillon** (jamais auto-validée) avec lignes, remises/frais de pied de document et fichier original (PDF Factur-X ou XML) attaché ; écran « Factur-X reçues » avec quarantaine pour les tiers introuvables ou ambigus et les devises étrangères
 - **Import manuel** d'un fichier Factur-X (PDF) ou XML (CII/UBL) reçu hors plateforme (par mail pendant la transition) : conversion par l'API SUPER PDP, même pipeline que le polling
@@ -143,6 +143,7 @@ Si un statut soumis à motif obligatoire est proposé dans ce menu (`fr:206`, `f
    - devise différente de celle de l'instance → **quarantaine** (saisie manuelle)
 3. L'écran **Facturation > Factures fournisseurs > Factur-X reçues (SUPER PDP)** liste tout : bouton **Synchroniser maintenant**, choix du tiers et import pour les quarantaines, écarter/réintégrer une facture
 4. La facture importée reste un **brouillon** : vérification humaine puis validation dans Dolibarr, comme une saisie manuelle
+5. **Notification e-mail (opt-in)** : renseigner une adresse dans le champ « E-mail notifié à la réception » de la configuration du module pour recevoir un e-mail à chaque nouvelle facture reçue (importée en brouillon, en quarantaine ou en erreur d'import), avec le fournisseur, la référence, le montant TTC et un lien direct. Champ vide = aucune notification.
 
 > **Mise à jour depuis une version < 1.0.0** : désactiver puis réactiver le module pour créer les tables `llx_lemonsuperpdp_reception` et `llx_lemonsuperpdp_ereporting`, les nouvelles permissions, les entrées de menu et les tâches planifiées. La désactivation ne supprime aucune donnée.
 
@@ -291,6 +292,7 @@ Le module consomme l'API documentée ici : https://www.superpdp.tech/documentati
 | `LEMONSUPERPDP_LAST_EVENT_ID` | string | `0` | Dernier `invoice_event` synchronisé (pagination cron) |
 | `LEMONSUPERPDP_IN_ENABLED` | int | 0 | Activer la réception des factures fournisseurs (`direction=in`) |
 | `LEMONSUPERPDP_LAST_IN_ID` | string | `0` | Dernière facture reçue synchronisée (curseur de polling) |
+| `LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL` | string | (vide) | E-mail notifié à chaque nouvelle facture fournisseur reçue via SUPER PDP — importée, en quarantaine ou en erreur d'import (vide = notification désactivée) |
 | `LEMONSUPERPDP_EREPORTING_ENABLED` | int | 0 | Activer l'e-reporting B2C (transactions + paiements des factures aux particuliers) |
 | `LEMONSUPERPDP_PRECHECK_DIRECTORY` | int | 1 | Vérifier l'annuaire des Plateformes Agréées avant chaque envoi |
 | `LEMONSUPERPDP_OAUTH_SIREN` | string | (vide) | SIREN de l'application OAuth, mémorisé au dernier "Tester la connexion" réussi pour la cohérence du diagnostic |

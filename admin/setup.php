@@ -59,6 +59,7 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 	$clientSecret = trim(GETPOST('LEMONSUPERPDP_CLIENT_SECRET', 'alphanohtml'));
 	$format = GETPOST('LEMONSUPERPDP_FORMAT', 'alpha');
 	$inEnabled = GETPOSTINT('LEMONSUPERPDP_IN_ENABLED');
+	$receptionNotifyEmail = trim(GETPOST('LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL', 'alphanohtml'));
 	$ereportingEnabled = GETPOSTINT('LEMONSUPERPDP_EREPORTING_ENABLED');
 	$precheckDirectory = GETPOSTINT('LEMONSUPERPDP_PRECHECK_DIRECTORY');
 	// >>> SANDBOX MODE — À SUPPRIMER APRÈS LA PHASE PILOTE <<<
@@ -99,6 +100,16 @@ if ($action == 'update' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 		$error++;
 	}
 	if (dolibarr_set_const($db, 'LEMONSUPERPDP_IN_ENABLED', $inEnabled, 'int', 0, '', $conf->entity) < 0) {
+		$error++;
+	}
+	// E-mail de notification à la réception : vide = désactivé. Une adresse
+	// invalide n'est pas enregistrée (la valeur précédente est conservée) —
+	// message spécifique, mais SANS $error++ : les autres réglages du
+	// formulaire, eux, ONT été sauvés (afficher « Error » global laisserait
+	// croire que rien n'a été enregistré).
+	if ($receptionNotifyEmail !== '' && !isValidEmail($receptionNotifyEmail)) {
+		setEventMessages($langs->trans('LemonSuperPDPRecNotifyEmailInvalid'), null, 'errors');
+	} elseif (dolibarr_set_const($db, 'LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL', $receptionNotifyEmail, 'chaine', 0, '', $conf->entity) < 0) {
 		$error++;
 	}
 	if (dolibarr_set_const($db, 'LEMONSUPERPDP_EREPORTING_ENABLED', $ereportingEnabled, 'int', 0, '', $conf->entity) < 0) {
@@ -286,6 +297,15 @@ print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPInEnabledHe
 if ($inCurrent) {
 	print '<br><a href="'.dol_buildpath('/lemonsuperpdp/reception_list.php', 1).'">'.$langs->trans("LemonSuperPDPRecListTitle").'</a>';
 }
+print '</td>';
+print '</tr>';
+
+// E-mail de notification à la réception d'une facture fournisseur
+print '<tr class="oddeven">';
+print '<td>'.$langs->trans("LemonSuperPDPRecNotifyEmail").'</td>';
+print '<td>';
+print '<input type="text" name="LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL" class="flat minwidth400" value="'.dol_escape_htmltag(getDolGlobalString('LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL', '')).'" placeholder="comptabilite@exemple.fr" autocomplete="off">';
+print '<br><span class="opacitymedium">'.$langs->trans("LemonSuperPDPRecNotifyEmailHelp").'</span>';
 print '</td>';
 print '</tr>';
 
