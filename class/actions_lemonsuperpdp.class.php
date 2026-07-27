@@ -64,12 +64,50 @@ class ActionsLemonSuperPDP
 
 	/**
 	 * Retourne le chemin absolu du PDF de la facture (sans garantie d'existence).
+	 *
+	 * Gère le cas des factures générées via un modèle ODT, où Dolibarr nomme
+	 * le fichier FXXXXXX_<suffixe_modele>.pdf au lieu de FXXXXXX.pdf (#1).
+	 *
+	 * Ordre de résolution :
+	 *   1) suffixe explicite via la constante LEMONSUPERPDP_PDF_SUFFIX
+	 *   2) chemin standard $ref.pdf (comportement historique)
+	 *   3) repli : scan du répertoire de la facture, on prend le PDF le plus
+	 *      récent dont le nom commence par $ref (couvre le cas ODT sans
+	 *      suffixe configuré, ou un suffixe différent de celui attendu)
 	 */
 	private function getInvoicePdfPath($invoice)
 	{
 		global $conf;
+
 		$ref = dol_sanitizeFileName($invoice->ref);
-		return $conf->facture->dir_output.'/'.$ref.'/'.$ref.'.pdf';
+		$dir = $conf->facture->dir_output.'/'.$ref;
+		$default = $dir.'/'.$ref.'.pdf';
+
+		$suffix = getDolGlobalString('LEMONSUPERPDP_PDF_SUFFIX', '');
+		if ($suffix !== '') {
+			$suffixed = $dir.'/'.$ref.'_'.$suffix.'.pdf';
+			if (file_exists($suffixed)) {
+				return $suffixed;
+			}
+		}
+
+		if (file_exists($default)) {
+			return $default;
+		}
+
+		if (is_dir($dir)) {
+			$candidates = glob($dir.'/'.$ref.'*.pdf');
+			if (!empty($candidates)) {
+				usort($candidates, function ($a, $b) {
+					return filemtime($b) - filemtime($a);
+				});
+				return $candidates[0];
+			}
+		}
+
+		// Rien trouvé : on retourne le chemin par défaut pour que l'appelant
+		// lève LemonSuperPDPPdfNotFound avec un message cohérent.
+		return $default;
 	}
 
 	/**
