@@ -1,318 +1,94 @@
-# LemonSuperPDP
+# LemonFacturX (fork) — ⚠️ Projet archivé / non maintenu
 
-Module Dolibarr pour l'**émission et la réception** des factures électroniques via la **Plateforme Agréée SUPER PDP** (https://www.superpdp.tech).
+> **Ce dépôt n'est plus maintenu.**
+> Aucune nouvelle version, correction de bug ni mise en conformité réglementaire ne sera publiée ici.
 
-Complément du module [LemonFacturX](https://github.com/hello-lemon/module-dolibarr-lemonfacturx) : là où LemonFacturX s'occupe du **format** (génération PDF/A-3 + XML EN16931 embarqué), LemonSuperPDP s'occupe du **transport** dans les deux sens — envoi des factures clients via l'API de la PA, synchronisation des statuts de cycle de vie, et import des factures fournisseurs reçues sur la plateforme en factures fournisseurs Dolibarr brouillon.
+---
 
-Développé et maintenu par [Lemon](https://hellolemon.fr), agence web et communication à Clermont-Ferrand, spécialisée dans Dolibarr, WordPress et la facturation électronique.
+## 📌 Pourquoi cet arrêt ?
 
-## Statut
+Ce dépôt était un **fork communautaire** du module LemonFacturX, maintenu bénévolement dans une logique
+d'ouverture et de partage autour de la réforme française de la facturation électronique.
 
-Version 1.4.0 — confort d'exploitation : bouton « Rafraîchir les statuts » sur la facture (+ rafraîchi auto à l'ouverture de l'onglet, sans dépendre du cron), notification e-mail à la réception d'une facture fournisseur, libellés d'événements plus lisibles. Cycle de vie aligné sur la norme XP Z12-012 (édition juin 2026). Fonctionnalités :
+La société **HelloLemon**, éditrice du module d'origine, a décidé de faire évoluer sa diffusion vers un
+**modèle payant**. Ce choix lui appartient pleinement et est parfaitement légitime : maintenir un module
+au rythme des évolutions réglementaires (spécifications externes DGFiP, formats Factur-X / EN 16931,
+raccordements PDP) représente un travail considérable qui mérite d'être financé.
 
-- **Réception des factures fournisseurs** : polling de l'API (`direction=in`), rattachement automatique du tiers par SIREN/SIRET, création de la facture fournisseur Dolibarr **en brouillon** (jamais auto-validée) avec lignes, remises/frais de pied de document et fichier original (PDF Factur-X ou XML) attaché ; écran « Factur-X reçues » avec quarantaine pour les tiers introuvables ou ambigus et les devises étrangères
-- **Import manuel** d'un fichier Factur-X (PDF) ou XML (CII/UBL) reçu hors plateforme (par mail pendant la transition) : conversion par l'API SUPER PDP, même pipeline que le polling
-- **Cycle de vie côté acheteur** : Approuver (fr:205) / Refuser (fr:210, avec motif obligatoire — BR-FR-CDV-15) depuis l'écran des factures reçues, et fr:211 (Paiement transmis) envoyé automatiquement au paiement de la facture fournisseur
-- **Pre-check annuaire** : avant chaque envoi, vérification que le destinataire a une adresse électronique active dans l'annuaire des Plateformes Agréées, avec un message clair sinon (au lieu du rejet cryptique de la plateforme)
-- **E-reporting B2C** : à la validation et au paiement des factures clients non assujettis à la TVA (particuliers, associations non assujetties...), mise en file des données de transactions (codes Z12-012 TLB1/TPS1/TNT1, ventilation par taux de TVA) et de paiements, transmises par lots à SUPER PDP qui agrège et déclare au PPF ; écran de suivi de la file avec relance des refusées
+En revanche, ce changement de modèle rend la poursuite de ce fork sans objet :
 
-- Authentification OAuth 2.1 `client_credentials` avec rafraîchissement automatique du token
-- Page de configuration avec test de connexion et diagnostic complet
-- Vérification de la cohérence du SIREN Dolibarr ↔ SIREN de l'application OAuth (les factures émises avec un SIREN incohérent sont rejetées par la PA)
-- Bouton "Envoyer via SUPER PDP" sur la fiche facture, grisé automatiquement quand le client est un non-assujetti à la TVA — particulier (type de tiers « Particulier ») ou personne morale non assujettie comme une association (champ « Assujetti à la TVA » à Non) : ces factures relèvent de l'e-reporting, pas de la facturation électronique B2B
-- Envoi en masse depuis la liste des factures
-- Suivi des statuts de cycle de vie (déposée, acceptée, refusée, encaissée) dans une table d'événements
-- Bouton "Rafraîchir" pour synchroniser à la demande, et cron `cron_sync_events.php` pour la synchronisation périodique
-- Trigger `BILL_PAYED` → envoi automatique du statut `fr:212` (encaissée)
-- Mode sandbox temporaire (swap SIREN via `idprof6`) pour la phase pilote
-- Bandeau "nouvelle version disponible" + bloc À propos sur la page admin
-- Traductions FR / EN complètes
+- il n'est plus aligné avec l'amont, qui n'est plus diffusé librement ;
+- maintenir seul une divergence croissante sur un périmètre aussi mouvant que l'e-invoicing
+  n'est ni tenable, ni utile à la communauté ;
+- dupliquer l'effort au lieu de le mutualiser irait à l'encontre de ce que je recherche dans l'open source.
 
-## Prérequis
+---
 
-- **Dolibarr** 18.0+
-- **Module LemonFacturX** activé (dépendance stricte)
-- **PHP** 7.4+
-- Un compte SUPER PDP avec une application OAuth créée (https://www.superpdp.tech)
+## 🍋 ➜ 🧾 Où aller maintenant ?
 
-## Installation
+**J'ai choisi de réinvestir mon temps dans le module communautaire `einvoicing`, hébergé dans le dépôt
+officiel [`Dolibarr/dolibarr-community-modules`](https://github.com/Dolibarr/dolibarr-community-modules).**
 
-### 1. Déployer le module dans Dolibarr
+C'est aujourd'hui, à mon sens, le meilleur point de convergence pour la facturation électronique
+sous Dolibarr :
 
-```bash
-cp -r lemonsuperpdp/ /var/www/html/custom/
-chown -R www-data:www-data /var/www/html/custom/lemonsuperpdp
-```
+- **officiel et véritablement communautaire** — le dépôt est hébergé sous l'organisation **Dolibarr**
+  elle-même, avec une gouvernance ouverte et des contributions multiples : aucune dépendance à un
+  éditeur unique ni à sa stratégie commerciale ;
+- **communauté active** — issues traitées, pull requests revues, discussions techniques vivantes ;
+- **installation native** — ce dépôt alimente le fichier `index.yaml` que Dolibarr télécharge pour proposer
+  les modules communautaires **directement installables depuis la page de configuration des modules**.
+  Plus de ZIP à récupérer à la main ;
+- **couverture fonctionnelle en progression rapide** — Factur-X / EN 16931, cycle de vie des statuts,
+  et intégration de plusieurs fournisseurs / PDP ;
+- **licence libre** — GPL-3.0 : vous pouvez l'utiliser, l'auditer, l'adapter et le redistribuer.
 
-Activer le module dans **Accueil > Configuration > Modules**.
+👉 **Module Einvoicing :** <https://github.com/Dolibarr/dolibarr-community-modules/tree/main/einvoicing>
 
-### 2. Créer une application OAuth sur SUPER PDP
+> ℹ️ Le même dépôt héberge également un module **`facturx`** dédié à la génération du format, ainsi que
+> `peppol` et `ksef` pour les contextes européens. Selon votre besoin (génération seule ou chaîne complète),
+> l'un ou l'autre peut être plus adapté.
 
-Avant de configurer le module, créez une application OAuth sur la plateforme SUPER PDP en production :
+Mes contributions se poursuivent désormais **exclusivement** de ce côté (notamment sur l'intégration
+multi-PDP et l'abstraction des clients de transmission).
 
-1. Connectez-vous sur https://www.superpdp.tech/app
-2. **Applications > Nouvelle application**
-3. Remplissez le formulaire :
+---
 
-| Champ | Valeur |
+## 🔁 Migration
+
+| Vous utilisiez ce fork pour… | Aller vers… |
 |---|---|
-| **Entreprise** | Sélectionner votre entreprise |
-| **URLs de redirection** | *Laisser vide* — non utilisé en flow `client_credentials` |
-| **Type d'application** | **Confidentielle** — le module est PHP server-side, le `client_secret` est stocké côté serveur Dolibarr (jamais exposé au navigateur) |
-| **IBAN** | IBAN de votre entreprise (mandat SEPA, prélèvement des frais d'API selon la grille tarifaire SUPER PDP) |
-| **Souscription** | Cocher pour accepter la grille tarifaire et signer le mandat SEPA |
+| Générer des factures au format Factur-X (EN 16931) | Modules `facturx` / `einvoicing` |
+| Profils CII / niveaux MINIMUM → EXTENDED | Module `einvoicing` |
+| Transmettre les factures à une plateforme (PDP) | Module `einvoicing` |
+| Support commercial et fonctions avancées | Offre payante **HelloLemon** |
 
-4. Cliquer sur **Créer**. Le `client_id` et le `client_secret` s'affichent. **Le `client_secret` n'est affiché qu'une seule fois** — copiez-le immédiatement.
+**Aucun script de migration automatique n'est fourni.** Les modules communautaires s'installent directement
+depuis **Configuration → Modules → Déployer/activer un module externe**, sans téléchargement manuel.
+Les données de facturation restant portées par le cœur de Dolibarr, la bascule consiste essentiellement à
+désactiver ce module puis à configurer le module communautaire.
 
-### 3. Configurer le module dans Dolibarr
+> 💡 **Avant toute manipulation : sauvegardez votre base de données et votre répertoire `documents/`.**
 
-Ouvrir **Accueil > Configuration > Modules > LemonSuperPDP > Configurer** et renseigner :
+---
 
-| Champ | Valeur |
-|---|---|
-| **URL de l'API** | `https://api.superpdp.tech` (production et bac à sable utilisent le même endpoint) |
-| **Identifiant OAuth (client_id)** | Le `client_id` de l'application créée à l'étape 2 |
-| **Secret OAuth (client_secret)** | Le `client_secret` de l'application créée à l'étape 2 |
-| **Format d'envoi** | `Factur-X` (recommandé — utilise le PDF/A-3 généré par LemonFacturX) |
+## 📦 Et le code existant ?
 
-Cliquer sur **Tester la connexion**. Le module appelle `GET /v1.beta/companies/me`, vérifie que le SIREN renvoyé par SUPER PDP correspond bien à celui de votre société Dolibarr (champ `idprof1` dans Accueil > Setup > Société), et mémorise ce SIREN pour les vérifications ultérieures.
+Le dépôt reste **en lecture seule, à titre d'archive** :
 
-Le diagnostic en bas de la page de configuration récapitule l'état de la configuration. Tant que le test de connexion n'a pas été effectué, la cohérence SIREN apparaît en erreur.
+- le code est toujours consultable et téléchargeable ;
+- la licence d'origine (**GPL v3+**) continue de s'appliquer : vous êtes libre de forker et de reprendre
+  la maintenance de votre côté ;
+- **les issues et pull requests ne seront plus traitées** ;
+- la dernière version publiée reste fonctionnelle en l'état, **mais sans garantie de conformité** avec les
+  évolutions réglementaires à venir. Ne l'utilisez pas en production pour des obligations légales.
 
-### 4. (Optionnel) Activer le cron de synchronisation des statuts
+---
 
-Pour la remontée automatique des accusés de réception et changements de statut (acceptée, refusée, encaissée), deux options :
+## 🙏 Remerciements
 
-**Cron interne Dolibarr** (recommandé) — **Accueil > Configuration > Cron jobs** :
+Merci à **HelloLemon** pour le travail initial, qui a permis à beaucoup d'entre nous de défricher le sujet
+Factur-X sous Dolibarr très tôt. Merci également à toutes les personnes qui ont testé ce fork, remonté des
+bugs et proposé des correctifs.
 
-| Champ | Valeur |
-|---|---|
-| Type | Exécution d'une méthode d'une classe PHP |
-| Nom | Synchronisation événements SUPER PDP |
-| Classe | `LemonSuperPDPCron` |
-| Fichier | `/lemonsuperpdp/class/lemonsuperpdp_cron.class.php` |
-| Méthode | `syncEvents` |
-| Fréquence | 15 minutes |
-
-**Cron système** :
-
-```cron
-*/15 * * * * www-data php /var/www/html/custom/lemonsuperpdp/scripts/cron_sync_events.php
-```
-
-## Mode d'emploi
-
-### Envoyer une facture
-
-1. Ouvrir la fiche d'une facture **validée**
-2. Cliquer sur **Envoyer via SUPER PDP** dans la barre d'actions
-3. Le module génère le payload (PDF Factur-X de LemonFacturX par défaut), appelle `POST /v1.beta/invoices`, enregistre la transmission et affiche le résultat
-
-Le bouton est **grisé** dans les cas suivants, avec un message au survol :
-
-| État | Message |
-|---|---|
-| Facture en brouillon | "La facture doit être validée avant d'être transmise" |
-| Client non assujetti à la TVA (type « Particulier », ou « Assujetti à la TVA » à Non) | "Le client est un non-assujetti à la TVA. La facturation électronique B2B ne concerne que les factures entre assujettis : cette facture relève de l'e-reporting." |
-| Facture déjà transmise avec succès | Le bouton n'apparaît pas, le bloc latéral affiche l'état de la transmission |
-
-### Envoyer en masse
-
-Depuis la liste des factures (**Comptabilité > Factures clients > Liste**), sélectionner les factures, choisir **Envoyer via SUPER PDP** dans le menu d'actions de masse. Le module envoie chaque facture individuellement et résume le résultat (`X réussie(s), Y échec(s), Z ignorée(s)`).
-
-Les ignorées sont les brouillons, les déjà transmises, et les factures B2C.
-
-### Suivre une transmission
-
-Sur la fiche facture, le bloc latéral **Transmission SUPER PDP** affiche le statut courant et la date d'envoi. L'onglet **Historique des événements** liste tous les `invoice_events` reçus (statuts réforme `fr:200` à `fr:213` plus `fr:501` Irrecevable, sens entrant/sortant).
-
-Le bouton **Rafraîchir** force une synchronisation à la demande pour cette facture (utile sans attendre le cron).
-
-### Envoyer manuellement un statut
-
-L'onglet **Cycle de vie** de la facture propose une émission manuelle de secours du statut `fr:212` Encaissée (normalement envoyé par le trigger `BILL_PAYED` quand vous validez un paiement dans Dolibarr). L'émission manuelle passe les mêmes détails que le trigger : montants encaissés **TTC** ventilés par taux de TVA (blocs `MEN`, exigés par la règle BR-FR-CDV-14), datés du dernier paiement enregistré.
-
-Si un statut soumis à motif obligatoire est proposé dans ce menu (`fr:206`, `fr:207`, `fr:208`, `fr:210` — règle BR-FR-CDV-15), le formulaire exige la saisie d'un code motif avant l'envoi.
-
-### Recevoir les factures fournisseurs
-
-1. Activer **Réception des factures fournisseurs** dans la configuration du module (désactivée par défaut)
-2. La tâche planifiée **Sync factures reçues SUPER PDP** (créée à l'activation du module, toutes les 15 minutes) interroge `GET /v1.beta/invoices?direction=in` et traite chaque nouvelle facture :
-   - tiers résolu par SIREN/SIRET (`idprof1`/`idprof2`) → **facture fournisseur brouillon** créée avec ses lignes, et le fichier original (PDF Factur-X ou XML) attaché à la facture
-   - tiers introuvable ou plusieurs correspondances → **quarantaine**
-   - devise différente de celle de l'instance → **quarantaine** (saisie manuelle)
-3. L'écran **Facturation > Factures fournisseurs > Factur-X reçues (SUPER PDP)** liste tout : bouton **Synchroniser maintenant**, choix du tiers et import pour les quarantaines, écarter/réintégrer une facture
-4. La facture importée reste un **brouillon** : vérification humaine puis validation dans Dolibarr, comme une saisie manuelle
-5. **Notification e-mail (opt-in)** : renseigner une adresse dans le champ « E-mail notifié à la réception » de la configuration du module pour recevoir un e-mail à chaque nouvelle facture reçue (importée en brouillon, en quarantaine ou en erreur d'import), avec le fournisseur, la référence, le montant TTC et un lien direct. Champ vide = aucune notification.
-
-> **Mise à jour depuis une version < 1.0.0** : désactiver puis réactiver le module pour créer les tables `llx_lemonsuperpdp_reception` et `llx_lemonsuperpdp_ereporting`, les nouvelles permissions, les entrées de menu et les tâches planifiées. La désactivation ne supprime aucune donnée.
-
-> **Mise à jour vers une version avec cycle de vie (colonnes `reason_code`/`reason`)** : la réactivation du module doit suivre **immédiatement** la copie des fichiers. Entre la copie et la réactivation, `LemonSuperPDPEvent::create()` référence des colonnes qui n'existent pas encore : les envois API partent, mais la trace locale des événements échoue (le polling rattrape les événements portant un identifiant plateforme, les autres sont perdus). Alternative : jouer `sql/llx_lemonsuperpdp_migration_lifecycle_columns.sql` **avant** la copie des fichiers.
-
-### Approuver, refuser, déclarer payée une facture reçue
-
-Sur l'écran **Factur-X reçues**, chaque facture importée depuis la plateforme propose **Approuver** (fr:205 Approuvée) et **Refuser** (fr:210 Refusée) — le fournisseur voit le statut remonter chez lui. Le refus ouvre une boîte de confirmation qui **exige un motif** (code MDT-113, règle BR-FR-CDV-15) : sans motif, l'envoi est bloqué. Au paiement de la facture fournisseur dans Dolibarr, le module envoie automatiquement **fr:211 Paiement transmis**. Les statuts émis sont tracés dans l'agenda de la facture fournisseur.
-
-Les imports manuels (fichier reçu par mail) n'ont pas d'identifiant plateforme : aucun statut n'est transmissible pour eux, c'est normal.
-
-### E-reporting B2C
-
-1. Activer **E-reporting B2C** dans la configuration du module (désactivé par défaut)
-2. À la **validation** d'une facture client dont le tiers est de type « Particulier », le module met en file les données de transaction (une déclaration par catégorie Z12-012 : TLB1 biens, TPS1 services, TNT1 non taxé, ventilées par taux de TVA). Au **paiement**, il met en file la déclaration de paiement (sous-totaux TTC)
-3. La tâche planifiée **Envoi e-reporting B2C SUPER PDP** (15 minutes) pousse la file par lots ; SUPER PDP agrège et transmet au PPF selon le régime de TVA configuré au niveau du compte
-4. L'écran **Facturation > Factures clients > E-reporting B2C (SUPER PDP)** affiche la file : en attente, transmises, refusées (relançables après correction)
-
-Les déclarations refusées par l'API (erreur 4xx) passent en « Refusée » et n'empêchent pas le reste de la file ; les erreurs réseau restent « En attente » et sont retentées à la passe suivante.
-
-## Conformité cycle de vie (XP Z12-012)
-
-L'API SUPER PDP transporte directement les codes statuts de la réforme (« ProcessConditionCode », MDT-105) préfixés `fr:` — il n'y a donc aucun transcodage entre l'API et la norme, seulement des libellés à afficher. La correspondance de référence vit dans `class/event.class.php` (constantes `STATUS_*`).
-
-### Statuts couverts
-
-| Code | Statut | Posé par | Le module... |
-|---|---|---|---|
-| `fr:200` | Déposée | PA émettrice | reçu au polling |
-| `fr:201` | Émise par la plateforme | PA émettrice | reçu au polling |
-| `fr:202` | Reçue par la plateforme | PA destinataire | reçu au polling |
-| `fr:203` | Mise à disposition | PA destinataire | reçu au polling |
-| `fr:204` | Prise en charge | Acheteur | reçu au polling |
-| `fr:205` | Approuvée | Acheteur | émis (bouton Approuver, factures reçues) / reçu |
-| `fr:206` | Approuvée partiellement | Acheteur | reçu (motif exigé à l'émission) |
-| `fr:207` | En litige | Acheteur | reçu (motif exigé à l'émission) |
-| `fr:208` | Suspendue | Acheteur | reçu (motif exigé à l'émission) |
-| `fr:209` | Complétée | Vendeur | reçu |
-| `fr:210` | Refusée | Acheteur | émis (bouton Refuser, motif obligatoire) / reçu |
-| `fr:211` | Paiement transmis | Acheteur | émis (trigger `BILL_SUPPLIER_PAYED`) / reçu |
-| `fr:212` | Encaissée | Vendeur | émis (trigger `BILL_PAYED` + secours manuel, montants MEN TTC) / reçu |
-| `fr:213` | Rejetée | PA | reçu au polling |
-| `fr:501` | Irrecevable | PA | reçu au polling |
-
-### Motifs de statut (BR-FR-CDV-15)
-
-La norme impose un motif (code MDT-113) pour les statuts Approuvée partiellement, En litige, Suspendue, Refusée, Rejetée et Irrecevable. Le module :
-
-- bloque toute émission de ces statuts sans code motif (UI liste des réceptions et onglet Cycle de vie) ;
-- transmet le code à la PA dans `details[].reason` (schéma `invoice_event_detail` de l'API) ;
-- stocke le code (`reason_code`) et un commentaire libre (`reason`, équivalent local du MDT-114 — non transmis, l'API n'exposant pas de champ texte) sur chaque événement émis depuis l'onglet Cycle de vie, et les trace dans l'agenda de la facture ; côté réception (refus fr:210), code et commentaire sont tracés dans la note agenda de la facture fournisseur (le suivi des factures reçues est porté par `llx_lemonsuperpdp_reception`, sans ligne événement locale).
-
-La liste officielle des codes motifs par statut est publiée dans l'annexe A (Excel) de la norme, feuille « Tableau des motifs de STATUTS » ; elle n'est pas embarquée dans le module. Elle se configure par instance via `LEMONSUPERPDP_REASON_CODES` (JSON `{"CODE": "Libellé"}`) et alimente alors les listes de choix ; à défaut, le code se saisit librement.
-
-### Montants (BR-FR-CDV-14)
-
-Le statut Encaissée (fr:212) part toujours avec des blocs de montants de type `MEN` : montant encaissé **TTC** ventilé par taux de TVA, dans la devise réelle de la facture (`multicurrency_code`, fallback devise société), daté du dernier paiement. `buildAmountsByVatRate()` accepte aussi les autres codes types de la règle BR-FR-CDV-CL-11 (`MPA`, `MAP`/`MAPTTC`, `MNA`/`MNATTC`...) pour les usages futurs (approbation partielle chiffrée).
-
-### Ce qui est délégué à la Plateforme Agréée
-
-Le module ne construit ni les messages CDAR (chap. 5 de la norme), ni les flux réglementaires : il pousse des appels REST à SUPER PDP, qui se charge de :
-
-- **Flux 1** (e-invoicing vers le PPF) : construit et transmis par la PA à partir de la facture déposée et des statuts obligatoires (Déposée, Rejetée, Refusée, Encaissée) ;
-- **Flux 10.1** (e-reporting) : la PA agrège nos déclarations `b2c_transactions` / `b2c_payments` et constitue le flux 10 attendu par le concentrateur du PPF ;
-- **Flux F11** (annuaire) : les données d'adressage viennent de la PA ; le module se contente d'interroger `/french_directory/entries` en pre-check avant envoi ;
-- **Messages CDAR de cycle de vie** : le module fournit code statut, motif et montants via `invoice_events`, la PA fabrique et achemine le message normalisé.
-
-## Diagnostic et dépannage
-
-### Page de diagnostic
-
-La page de configuration affiche en bas un bloc **Diagnostic** qui vérifie quatre points :
-
-1. Module LemonFacturX activé
-2. Identifiants OAuth renseignés
-3. SIRET de votre société renseigné (`idprof2` de mysoc)
-4. Cohérence du SIREN Dolibarr avec le SIREN de l'application OAuth (alimentée par le dernier "Tester la connexion" réussi)
-
-Tous les points doivent être verts pour que la configuration soit considérée comme prête.
-
-### Erreurs courantes
-
-**`pre-check: receiver address does not exist in peppol directory`** (HTTP 400) — Le destinataire n'est pas inscrit dans l'annuaire Peppol. Causes possibles :
-- Le client n'est pas raccordé à une PA/PDP. En période de transition (avant l'obligation générale), c'est le cas le plus courant. Le destinataire doit s'inscrire auprès d'une PA pour pouvoir recevoir.
-- Le SIRET du client est absent ou erroné côté Dolibarr.
-- L'application OAuth est en bac à sable et le destinataire en production (ou inversement). Vérifier le champ `env` dans la réponse de `/v1.beta/companies/me`.
-
-**`SIREN de votre société (X) différent du SIREN de l'application OAuth SUPER PDP (Y)`** — La société Dolibarr et l'application OAuth ne pointent pas la même entité juridique. Corriger soit `idprof1` dans Accueil > Setup > Société, soit créer une nouvelle application OAuth pour la bonne entreprise sur SUPER PDP.
-
-**`Échec de la connexion SUPER PDP — invalid_client`** — `client_id` ou `client_secret` incorrect. Recréer une application OAuth si le secret a été perdu (il n'est affiché qu'une fois à la création).
-
-**`Échec de la connexion SUPER PDP — pdf not found`** — La facture n'a pas de PDF Factur-X. Vérifier que LemonFacturX est activé et qu'un PDF a été généré pour la facture (bouton **Générer le PDF** sur la fiche facture).
-
-### Mode sandbox du module (phase pilote uniquement)
-
-L'option **Mode sandbox (phase pilote)** dans la configuration est destinée à la **phase pilote SUPER PDP**. Quand activée, le module remplace le SIREN émetteur de la facture par la valeur du champ `idprof6` de votre société avant l'envoi (utile quand votre application OAuth est sur une entreprise bac à sable mais que votre Dolibarr est configuré avec votre SIREN réel).
-
-À désactiver dès que votre SIREN réel est validé côté SUPER PDP. Cette option a vocation à disparaître après la fin de la phase pilote.
-
-## Architecture
-
-```
-lemonsuperpdp/
-├── core/modules/modLemonSuperPDP.class.php  # Descripteur (n° 210009)
-├── core/lib/lemonsuperpdp.lib.php           # Lib utilitaire (update check GitHub)
-├── core/triggers/                           # Trigger BILL_PAYED → fr:212
-├── class/superpdp_client.class.php          # Client HTTP OAuth 2.1
-├── class/transmission.class.php             # Objet métier transmission
-├── class/event.class.php                    # Objet métier event
-├── class/actions_lemonsuperpdp.class.php    # Hooks UI (bouton, bloc latéral, bulk)
-├── class/lemonsuperpdp_cron.class.php       # Cron de synchronisation
-├── admin/setup.php                          # Configuration + test connexion + diagnostic
-├── ajax/                                    # Handlers AJAX (rafraîchir, statut manuel)
-├── scripts/cron_sync_events.php             # Cron CLI standalone
-├── sql/                                     # CREATE TABLE + index
-└── langs/fr_FR/, langs/en_US/               # Traductions
-```
-
-## API SUPER PDP
-
-Le module consomme l'API documentée ici : https://www.superpdp.tech/documentation
-
-- Authentification : OAuth 2.1 `client_credentials` sur `/oauth2/token`
-- Endpoints utilisés : `/v1.beta/companies/me`, `/v1.beta/invoices` (envoi, et liste `direction=in` avec expand `en_invoice.*` pour la réception), `/v1.beta/invoices/{id}/download`, `/v1.beta/invoice_events`, `/v1.beta/invoices/{id}` (expand `invoice_events`)
-- Synchronisation des événements : polling avec `starting_after_id` (la doc ne prévoit pas de webhook)
-- La réponse `/v1.beta/companies/me` expose le SIREN dans le champ `number` quand `number_scheme == "fr_siren"`, et l'environnement de l'application dans le champ `env` (`production` ou `sandbox`)
-
-## Sécurité
-
-- `client_secret` stocké en constante Dolibarr (table `llx_const`), jamais affiché en clair dans la page de configuration (remplacé par `********` si déjà défini)
-- Token OAuth caché en constante avec `expires_at`, rafraîchi automatiquement avant expiration
-- Endpoint OAuth contraint au schéma `https://` (mitigation SSRF)
-- Toutes les actions POST sont protégées par un token CSRF Dolibarr
-- Voir [SECURITY.md](SECURITY.md) pour le threat model et la politique de divulgation
-
-## Constantes du module
-
-| Constante | Type | Défaut | Description |
-|---|---|---|---|
-| `LEMONSUPERPDP_ENABLED` | int | 1 | Activer/désactiver |
-| `LEMONSUPERPDP_ENDPOINT` | string | `https://api.superpdp.tech` | URL de base de l'API |
-| `LEMONSUPERPDP_CLIENT_ID` | string | (vide) | OAuth client_id |
-| `LEMONSUPERPDP_CLIENT_SECRET` | string | (vide) | OAuth client_secret |
-| `LEMONSUPERPDP_FORMAT` | string | `facturx` | Format d'envoi (`facturx`, `ubl`, `cii`) |
-| `LEMONSUPERPDP_ACCESS_TOKEN` | string | (vide) | Cache du token OAuth (JSON `{access_token, expires_at}`) |
-| `LEMONSUPERPDP_LAST_EVENT_ID` | string | `0` | Dernier `invoice_event` synchronisé (pagination cron) |
-| `LEMONSUPERPDP_IN_ENABLED` | int | 0 | Activer la réception des factures fournisseurs (`direction=in`) |
-| `LEMONSUPERPDP_LAST_IN_ID` | string | `0` | Dernière facture reçue synchronisée (curseur de polling) |
-| `LEMONSUPERPDP_RECEPTION_NOTIFY_EMAIL` | string | (vide) | E-mail notifié à chaque nouvelle facture fournisseur reçue via SUPER PDP — importée, en quarantaine ou en erreur d'import (vide = notification désactivée) |
-| `LEMONSUPERPDP_EREPORTING_ENABLED` | int | 0 | Activer l'e-reporting B2C (transactions + paiements des factures aux particuliers) |
-| `LEMONSUPERPDP_PRECHECK_DIRECTORY` | int | 1 | Vérifier l'annuaire des Plateformes Agréées avant chaque envoi |
-| `LEMONSUPERPDP_OAUTH_SIREN` | string | (vide) | SIREN de l'application OAuth, mémorisé au dernier "Tester la connexion" réussi pour la cohérence du diagnostic |
-| `LEMONSUPERPDP_OAUTH_SIREN_AT` | string | `0` | Timestamp du dernier rafraîchissement de `LEMONSUPERPDP_OAUTH_SIREN` |
-| `LEMONSUPERPDP_SANDBOX_MODE` | int | 0 | Mode sandbox phase pilote : remplace le SIREN émetteur par `idprof6` avant envoi (à désactiver en prod) |
-| `LEMONSUPERPDP_REASON_CODES` | string | (vide) | Codes motifs normalisés (MDT-113) proposés à la saisie, JSON `{"CODE": "Libellé", ...}` — cf feuille « Tableau des motifs de STATUTS » de l'annexe A de la XP Z12-012 |
-
-## Licence
-
-Distribué sous licence [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html) — Copyright (C) 2026 [SASU Lemon](https://hellolemon.fr).
-
-## À propos de Lemon
-
-[Lemon](https://hellolemon.fr) est une agence web et communication basée à Clermont-Ferrand, fondée en 2012. Nous accompagnons TPE, PME et indépendants bien au-delà du simple site web :
-
-- **Déploiement et hébergement Dolibarr** : installation, migration, paramétrage métier, formation de vos équipes
-- **Modules Dolibarr sur mesure** : CRM, pointeuse NFC, facturation électronique, intégrations API, automatisations — on développe le module qui manque à votre ERP
-- **Facturation électronique** : mise en conformité Factur-X EN16931, raccordement aux Plateformes Agréées (PA/PDP), accompagnement réforme 2026-2027
-- **IA au service des pros** : extraction automatique de factures fournisseurs, rapprochement bancaire, génération de contenus, assistants métier — on met l'IA au travail pour vous faire gagner du temps
-- **Sites web** : WordPress, Astro, Symfony — performance, SEO, éco-conception
-- **Communication & print** : identité visuelle, impression, fabrication (laser, 3D)
-
-Un projet Dolibarr, une idée d'automatisation, un besoin IA ? [Parlons-en](https://hellolemon.fr) — Clermont-Ferrand (63).
+Rendez-vous sur le module **Einvoicing** — les contributions y sont les bienvenues. 🚀
